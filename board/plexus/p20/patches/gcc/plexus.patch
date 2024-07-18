@@ -1,0 +1,68 @@
+diff --git a/config/picflag.m4 b/config/picflag.m4
+index 3f3ac744c96..a7229d93226 100644
+--- a/config/picflag.m4
++++ b/config/picflag.m4
+@@ -66,6 +66,9 @@ case "${$2}" in
+     sh*-*-netbsd*)
+ 	$1=-fpic
+ 	;;
++    m68k-*)
++        #nope
++        ;;
+     # Default to -fPIC unless specified otherwise.
+     *)
+ 	$1=-fPIC
+diff --git a/gcc/config/m68k/linux.h b/gcc/config/m68k/linux.h
+index b711f49f986..bf22ca148e1 100644
+--- a/gcc/config/m68k/linux.h
++++ b/gcc/config/m68k/linux.h
+@@ -28,9 +28,9 @@ along with GCC; see the file COPYING3.  If not see
+ /* for 68k machines this only needs to be TRUE for the 68000 */
+ 
+ #undef STRICT_ALIGNMENT
+-#define STRICT_ALIGNMENT 0
++#define STRICT_ALIGNMENT 1
+ #undef M68K_HONOR_TARGET_STRICT_ALIGNMENT
+-#define M68K_HONOR_TARGET_STRICT_ALIGNMENT 0
++#define M68K_HONOR_TARGET_STRICT_ALIGNMENT 1
+ 
+ /* Here are four prefixes that are used by asm_fprintf to
+    facilitate customization for alternate assembler syntaxes.
+diff --git a/gcc/config/m68k/m68k-devices.def b/gcc/config/m68k/m68k-devices.def
+index d8d46afd216..2fb767683f3 100644
+--- a/gcc/config/m68k/m68k-devices.def
++++ b/gcc/config/m68k/m68k-devices.def
+@@ -71,7 +71,7 @@
+ 
+ /* 680x0 series processors.  */
+ M68K_DEVICE ("68000", m68000,   "68000", "68000", 68000,    isa_00,    0)
+-M68K_DEVICE ("68010", m68010,   "68010", "68000", 68010,    isa_10,    0)
++M68K_DEVICE ("68010", m68010,   "68010", "68010", 68010,    isa_10,    FL_MMU)
+ M68K_DEVICE ("68020", m68020,   "68020", "68020", 68020,    isa_20,    FL_MMU | FL_UCLINUX)
+ M68K_DEVICE ("68030", m68030,   "68030", "68020", 68030,    isa_20,    FL_MMU | FL_UCLINUX)
+ M68K_DEVICE ("68040", m68040,   "68040", "68040", 68040,    isa_40,    FL_MMU)
+diff --git a/gcc/config/m68k/m68k.h b/gcc/config/m68k/m68k.h
+index 0d571997143..72d11e5f1c6 100644
+--- a/gcc/config/m68k/m68k.h
++++ b/gcc/config/m68k/m68k.h
+@@ -279,7 +279,7 @@ along with GCC; see the file COPYING3.  If not see
+    targets.  */
+ 
+ #define LONG_DOUBLE_TYPE_SIZE			\
+-  ((TARGET_COLDFIRE || TARGET_FIDOA) ? 64 : 80)
++  ((TARGET_COLDFIRE || TARGET_FIDOA || TARGET_68010) ? 64 : 80)
+ 
+ #define BITS_BIG_ENDIAN 1
+ #define BYTES_BIG_ENDIAN 1
+diff --git a/gcc/config/m68k/t-mlibs b/gcc/config/m68k/t-mlibs
+index b7da743f31c..ef9d89b6f92 100644
+--- a/gcc/config/m68k/t-mlibs
++++ b/gcc/config/m68k/t-mlibs
+@@ -85,6 +85,7 @@ MULTILIB_EXCEPTIONS += $(call M68K_AWK,\
+ 	(CPU_NAME == MLIB) $(M68K_MLIB_CPU) \
+ 	 && (((CPU ~ "^mcf") && !match(FLAGS, "FL_CF_FPU")) \
+ 	     || CPU == "cpu32" \
++	     || CPU == "m68010" \
+ 	     || CPU == "m68000"), \
+ 	 "mcpu="MLIB"/msoft-float*")
+ endif

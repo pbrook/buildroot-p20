@@ -1,0 +1,13 @@
+diff --git a/ld/emulparams/m68kelf.sh b/ld/emulparams/m68kelf.sh
+index 79b3251ebad..7dd60c0304b 100644
+--- a/ld/emulparams/m68kelf.sh
++++ b/ld/emulparams/m68kelf.sh
+@@ -1,7 +1,7 @@
+ SCRIPT_NAME=elf
+ OUTPUT_FORMAT="elf32-m68k"
+ NO_REL_RELOCS=yes
+-TEXT_START_ADDR=0x80000000
++TEXT_START_ADDR=0x00010000
+ MAXPAGESIZE="CONSTANT (MAXPAGESIZE)"
+ COMMONPAGESIZE="CONSTANT (COMMONPAGESIZE)"
+ ARCH=m68k

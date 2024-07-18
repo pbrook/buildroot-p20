@@ -1,0 +1,77 @@
+diff --git a/arch/m68k/atomic_arch.h b/arch/m68k/atomic_arch.h
+index b369649a..00748fe0 100644
+--- a/arch/m68k/atomic_arch.h
++++ b/arch/m68k/atomic_arch.h
+@@ -1,4 +1,20 @@
++#include <syscall.h>
++
+ #define a_cas a_cas
++#ifdef __mc68010
++static inline int a_cas(volatile int *p, int t, int s)
++{
++	register volatile int *a0 __asm("a0") = p;
++	register int d0 __asm("d0") = __NR_atomic_cmpxchg_32;
++	register int d1 __asm("d1") = s;
++	register int d2 __asm("d2") = t;
++	__asm__ __volatile__ (
++		"trap #0"
++		: "+d"(d0) : "a"(a0), "d"(d1), "d"(d2) : "memory", "cc");
++	return d0;
++}
++
++#else
+ static inline int a_cas(volatile int *p, int t, int s)
+ {
+ 	__asm__ __volatile__ (
+@@ -6,3 +22,4 @@ static inline int a_cas(volatile int *p, int t, int s)
+ 		: "+d"(t) : "a"(p), "d"(s) : "memory", "cc");
+ 	return t;
+ }
++#endif
+diff --git a/arch/m68k/bits/float.h b/arch/m68k/bits/float.h
+index 0e6899d5..61edf72f 100644
+--- a/arch/m68k/bits/float.h
++++ b/arch/m68k/bits/float.h
+@@ -1,4 +1,4 @@
+-#if !__mcffpu__
++#if !(__mcffpu__ || __mc68010)
+ 
+ #define FLT_EVAL_METHOD 2
+ 
+diff --git a/arch/m68k/reloc.h b/arch/m68k/reloc.h
+index f920b39e..bd5a5642 100644
+--- a/arch/m68k/reloc.h
++++ b/arch/m68k/reloc.h
+@@ -21,7 +21,7 @@
+ #define REL_TPOFF       R_68K_TLS_TPREL32
+ 
+ #define CRTJMP(pc,sp) __asm__ __volatile__( \
+-	"move.l %1,%%sp ; jmp (%0)" : : "r"(pc), "r"(sp) : "memory" )
++	"move.l %1,%%sp ; jmp (%0)" : : "a"(pc), "r"(sp) : "memory" )
+ 
+ #define GETFUNCSYM(fp, sym, got) __asm__ ( \
+ 	".hidden " #sym "\n" \
+diff --git a/src/setjmp/m68k/longjmp.s b/src/setjmp/m68k/longjmp.s
+index cdb05fb5..05a34d66 100644
+--- a/src/setjmp/m68k/longjmp.s
++++ b/src/setjmp/m68k/longjmp.s
+@@ -9,6 +9,6 @@ longjmp:
+ 	bne 1f
+ 	move.l #1,%d0
+ 1:	movem.l (%a0),%d2-%d7/%a2-%a7
+-	fmovem.x 52(%a0),%fp2-%fp7
++	#fmovem.x 52(%a0),%fp2-%fp7
+ 	move.l 48(%a0),(%sp)
+ 	rts
+diff --git a/src/setjmp/m68k/setjmp.s b/src/setjmp/m68k/setjmp.s
+index 15e549b0..46edc4cd 100644
+--- a/src/setjmp/m68k/setjmp.s
++++ b/src/setjmp/m68k/setjmp.s
+@@ -13,6 +13,6 @@ setjmp:
+ 	movea.l 4(%sp),%a0
+ 	movem.l %d2-%d7/%a2-%a7,(%a0)
+ 	move.l (%sp),48(%a0)
+-	fmovem.x %fp2-%fp7,52(%a0)
++	#fmovem.x %fp2-%fp7,52(%a0)
+ 	clr.l %d0
+ 	rts

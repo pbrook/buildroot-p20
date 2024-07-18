@@ -1,0 +1,3009 @@
+diff --git a/arch/m68k/Kbuild b/arch/m68k/Kbuild
+index 7762af9f6def..fbbcdd996bb6 100644
+--- a/arch/m68k/Kbuild
++++ b/arch/m68k/Kbuild
+@@ -18,3 +18,4 @@ obj-$(CONFIG_M68KFPU_EMU)	+= math-emu/
+ obj-$(CONFIG_M68000)		+= 68000/
+ obj-$(CONFIG_COLDFIRE)		+= coldfire/
+ obj-$(CONFIG_VIRT)		+= virt/
++obj-$(CONFIG_PLEXUS)		+= plexus/
+diff --git a/arch/m68k/Kconfig b/arch/m68k/Kconfig
+index 3e318bf9504c..e96c49c8f7e6 100644
+--- a/arch/m68k/Kconfig
++++ b/arch/m68k/Kconfig
+@@ -69,7 +69,7 @@ config HZ
+ 	default 100
+ 
+ config PGTABLE_LEVELS
+-	default 2 if SUN3 || COLDFIRE
++	default 2 if SUN3 || COLDFIRE || PLEXUS
+ 	default 3
+ 
+ config MMU
+@@ -89,6 +89,10 @@ config MMU_SUN3
+ 	bool
+ 	depends on MMU && !MMU_MOTOROLA && !MMU_COLDFIRE
+ 
++config MMU_PLEXUS
++	bool
++	depends on MMU && !MMU_MOTOROLA && !MMU_COLDFIRE
++
+ config ARCH_SUPPORTS_KEXEC
+ 	def_bool M68KCLASSIC && MMU
+ 
+diff --git a/arch/m68k/Kconfig.cpu b/arch/m68k/Kconfig.cpu
+index b826e9c677b2..9eeee7847034 100644
+--- a/arch/m68k/Kconfig.cpu
++++ b/arch/m68k/Kconfig.cpu
+@@ -53,6 +53,21 @@ config M68000
+ 	  System-On-Chip devices (eg 68328, 68302, etc). It does not contain
+ 	  a paging MMU.
+ 
++config M68010
++        bool "68010 support"
++	depends on MMU
++	select CPU_HAS_ADDRESS_SPACES
++	select CPU_HAS_NO_BITFIELDS
++	select CPU_HAS_NO_CAS
++	select CPU_HAS_NO_MULDIV64
++	select CPU_HAS_NO_UNALIGNED
++	select GENERIC_CSUM
++	select CPU_NO_EFFICIENT_FFS
++	select HAVE_ARCH_HASH
++	select LEGACY_TIMER_TICK
++	help
++	  The Freescale (was Motorola) 68010 CPU with external MMU
++
+ config M68020
+ 	bool "68020 support"
+ 	depends on MMU
+@@ -385,9 +400,9 @@ config RMW_INSNS
+ 	  adventurous.
+ 
+ config SINGLE_MEMORY_CHUNK
+-	bool "Use one physical chunk of memory only" if ADVANCED && !SUN3
++	bool "Use one physical chunk of memory only" if ADVANCED && !(SUN3 || PLEXUS)
+ 	depends on MMU
+-	default y if SUN3 || MMU_COLDFIRE
++	default y if SUN3 || MMU_COLDFIRE || PLEXUS
+ 	help
+ 	  Ignore all but the first contiguous chunk of physical memory for VM
+ 	  purposes.  This will save a few bytes kernel size and may speed up
+diff --git a/arch/m68k/Kconfig.machine b/arch/m68k/Kconfig.machine
+index 1f3574aef638..65a1bcce3172 100644
+--- a/arch/m68k/Kconfig.machine
++++ b/arch/m68k/Kconfig.machine
+@@ -3,6 +3,18 @@ comment "Machine Types"
+ 
+ if M68KCLASSIC
+ 
++config PLEXUS
++        bool "Plexus P/20"
++	depends on MMU
++        depends on !MMU_MOTOROLA
++        depends on !MMU_SUN3
++	select MMU_PLEXUS if MMU
++	select M68010
++	select LEGACY_TIMER_TICK
++	select NO_DMA
++	help
++	  This option enables support for the Plexus P/20
++
+ config AMIGA
+ 	bool "Amiga support"
+ 	depends on MMU
+diff --git a/arch/m68k/Makefile b/arch/m68k/Makefile
+index 43e39040d3ac..fff84fde49e9 100644
+--- a/arch/m68k/Makefile
++++ b/arch/m68k/Makefile
+@@ -38,6 +38,7 @@ endif
+ cpuflags-$(CONFIG_M68030)	=
+ cpuflags-$(CONFIG_M68020)	=
+ cpuflags-$(CONFIG_M68000)	= -m68000
++cpuflags-$(CONFIG_M68010)	= -m68010
+ cpuflags-$(CONFIG_M5441x)	= $(call cc-option,-mcpu=54455,-mcfv4e)
+ cpuflags-$(CONFIG_M54xx)	= $(call cc-option,-mcpu=5475,-m5200)
+ cpuflags-$(CONFIG_M5407)	= $(call cc-option,-mcpu=5407,-m5200)
+diff --git a/arch/m68k/include/asm/cacheflush_mm.h b/arch/m68k/include/asm/cacheflush_mm.h
+index 9a71b0148461..c12e888fd4cc 100644
+--- a/arch/m68k/include/asm/cacheflush_mm.h
++++ b/arch/m68k/include/asm/cacheflush_mm.h
+@@ -126,7 +126,7 @@ static inline void flush_icache(void)
+ 			"	.chip	68040\n"
+ 			"	cpusha	%bc\n"
+ 			"	.chip	68k");
+-	} else {
++	} else if (!CPU_IS_010) {
+ 		unsigned long tmp;
+ 		asm volatile (	"movec	%%cacr,%0\n"
+ 			"	or.w	%1,%0\n"
+@@ -166,7 +166,7 @@ extern void cache_push_v(unsigned long vaddr, int len);
+ 				     ".chip 68040\n\t"		\
+ 				     "cpusha %dc\n\t"		\
+ 				     ".chip 68k");		\
+-	} else {						\
++	} else if (!CPU_IS_010) {						\
+ 		unsigned long _tmp;				\
+ 		__asm__ __volatile__("movec %%cacr,%0\n\t"	\
+ 				     "orw %1,%0\n\t"		\
+@@ -244,7 +244,7 @@ static inline void __flush_pages_to_ram(void *vaddr, unsigned int nr)
+ 					     : : "a" (paddr));
+ 			paddr += PAGE_SIZE;
+ 		} while (--nr);
+-	} else {
++	} else if (!CPU_IS_010) {
+ 		unsigned long _tmp;
+ 		__asm__ __volatile__("movec %%cacr,%0\n\t"
+ 				     "orw %1,%0\n\t"
+diff --git a/arch/m68k/include/asm/config.h b/arch/m68k/include/asm/config.h
+index 9bb888ab5009..aa13299bb725 100644
+--- a/arch/m68k/include/asm/config.h
++++ b/arch/m68k/include/asm/config.h
+@@ -31,5 +31,6 @@ extern void config_q40(void);
+ extern void config_sun3(void);
+ extern void config_sun3x(void);
+ extern void config_virt(void);
++extern void config_plexus(void);
+ 
+ #endif /* _M68K_CONFIG_H */
+diff --git a/arch/m68k/include/asm/irq.h b/arch/m68k/include/asm/irq.h
+index 7829e955ca04..494d50469762 100644
+--- a/arch/m68k/include/asm/irq.h
++++ b/arch/m68k/include/asm/irq.h
+@@ -13,7 +13,8 @@
+ #if defined(CONFIG_COLDFIRE)
+ #define NR_IRQS 256
+ #elif defined(CONFIG_VME) || defined(CONFIG_SUN3) || \
+-      defined(CONFIG_SUN3X) || defined(CONFIG_VIRT)
++      defined(CONFIG_SUN3X) || defined(CONFIG_VIRT) || \
++      defined(CONFIG_PLEXUS)
+ #define NR_IRQS 200
+ #elif defined(CONFIG_ATARI)
+ #define NR_IRQS 141
+@@ -32,7 +33,8 @@
+ #endif
+ 
+ #if defined(CONFIG_M68020) || defined(CONFIG_M68030) || \
+-    defined(CONFIG_M68040) || defined(CONFIG_M68060)
++    defined(CONFIG_M68040) || defined(CONFIG_M68060) || \
++    defined(CONFIG_M68010)
+ 
+ /*
+  * Interrupt source definitions
+diff --git a/arch/m68k/include/asm/kmap.h b/arch/m68k/include/asm/kmap.h
+index 4efb3efa593a..414ef886cdef 100644
+--- a/arch/m68k/include/asm/kmap.h
++++ b/arch/m68k/include/asm/kmap.h
+@@ -10,6 +10,17 @@
+ #define IOMAP_NOCACHE_NONSER		2
+ #define IOMAP_WRITETHROUGH		3
+ 
++#ifdef CONFIG_PLEXUS
++static inline void iounmap(void __iomem *addr)
++{
++}
++
++//#define ioremap ioremap
++static inline void __iomem *ioremap(unsigned long physaddr, unsigned long size)
++{
++    return (void __iomem *)physaddr;
++}
++#else
+ /*
+  * These functions exported by arch/m68k/mm/kmap.c.
+  * Only needed on MMU enabled systems.
+@@ -32,6 +43,7 @@ static inline void __iomem *ioremap_wt(unsigned long physaddr,
+ {
+ 	return __ioremap(physaddr, size, IOMAP_WRITETHROUGH);
+ }
++#endif
+ 
+ #define memset_io memset_io
+ static inline void memset_io(volatile void __iomem *addr, unsigned char val,
+diff --git a/arch/m68k/include/asm/mmu.h b/arch/m68k/include/asm/mmu.h
+index e00672425b00..f0f94d07c202 100644
+--- a/arch/m68k/include/asm/mmu.h
++++ b/arch/m68k/include/asm/mmu.h
+@@ -3,8 +3,16 @@
+ #define __MMU_H
+ 
+ #ifdef CONFIG_MMU
++#if defined(CONFIG_PLEXUS)
++/* Copy the whole mapper state on a context switch */
++typedef struct {
++    pgd_t pgd[1];
++    int mapid;
++} mm_context_t;
++#else
+ /* Default "unsigned long" context */
+ typedef unsigned long mm_context_t;
++#endif
+ #else
+ #include <asm-generic/mmu.h>
+ #endif
+diff --git a/arch/m68k/include/asm/mmu_context.h b/arch/m68k/include/asm/mmu_context.h
+index 141bbdfad960..11467f834152 100644
+--- a/arch/m68k/include/asm/mmu_context.h
++++ b/arch/m68k/include/asm/mmu_context.h
+@@ -217,6 +217,41 @@ static inline void activate_mm(struct mm_struct *prev_mm,
+ 	activate_context(next_mm);
+ }
+ 
++#elif defined(CONFIG_PLEXUS)
++
++#include <asm/plexus.h>
++#include <asm/io.h>
++
++void plexus_allocate_mapid(struct mm_struct *mm);
++void plexus_release_mapid(int mapid);
++
++#define destroy_context destroy_context
++static inline void destroy_context(struct mm_struct *mm)
++{
++        if (mm->context.mapid >= 0) {
++            plexus_release_mapid(mm->context.mapid);
++        }
++}
++
++#define init_new_context init_new_context
++static inline int init_new_context(struct task_struct *tsk,
++				   struct mm_struct *mm)
++{
++        mm->context.mapid = -1;
++	return 0;
++}
++
++static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
++			     struct task_struct *tsk)
++{
++    BUG_ON(next == &init_mm);
++        if (next->context.mapid < 0) {
++                plexus_allocate_mapid(next);
++        }
++        //pr_info("switch_mm %02x stack %p\n", next->context.mapid, tsk->stack);
++        __raw_writew(next->context.mapid, plexus_mapid_reg);
++}
++
+ #else
+ 
+ #include <asm/setup.h>
+diff --git a/arch/m68k/include/asm/p20-remote.h b/arch/m68k/include/asm/p20-remote.h
+new file mode 100644
+index 000000000000..aaf26baf8bbd
+--- /dev/null
++++ b/arch/m68k/include/asm/p20-remote.h
+@@ -0,0 +1,247 @@
++#ifndef NCC
++#define NCC 8
++#endif
++
++#define OUTBUFSZ 1024		/* must be power of 2 */
++#define INBUFSZ 256		/* must be power of 2 */
++
++/* Looks like an firmware bug - r_tty only actually defines 63 bytes of data
++ * an additonal byte of padding is added by the compiler to satisfy alignment
++ * of the struct as a whole */
++#define EBUFSZ 10		/* round this so that sizeof r_tty is power
++                                 * of 2. currently 64 .*/
++
++#define NUMUNITS 8
++#define MAXUNITS 8		/* MAX # of usarts */
++#define NODEVICE (-1)
++#define NOPTR	 (-1)
++
++#define false 0
++#define true 1
++
++#define JDINTVECTOR	0xC2
++#define DJINTVECTOR	0xC1
++
++/* commands from the remote to the job processor */
++
++#define INPUT   1               /* give unix an interrupt because delct = 1 */
++#define SCSTAT  2		/* status from scsi completion */
++#define ABORT   3               /* abort last disk request */
++#define SDEBUG	4		/* sysdebug call */
++#define BREAKINT 5		/* break interrupt on tty */
++#define SCNODEV	 6		/* no device present */
++
++/* commands from job processor to remote processor */
++
++#define SCSICOM   1		/* disk com from job to remote */
++#define TTYRFLUSH 2             /* flush tty read queue */
++#define TTYWFLUSH 3             /* flush tty write que */
++#define TTYBFLUSH 4             /* flush both input and output */
++#define TTYOPEN   5		/* open tty */
++#define TTYCLOSE  6		/* */
++#define RESTART	  7		/* reset to boot */
++#define INITSCSI  8		/* scsi init sequence */
++#define SCSIRCOM  9		/* read on scsi. for non standard commands */
++#define MSGCOM	 10		/* scsi message command */
++
++/* Global data for remote CPU */
++
++extern struct UCOM {			/* UNIX command */
++        unsigned short op;      /* The command */
++        unsigned short count;   /* the count, if any */
++        short device;  		/* device # of interrupting device */
++        struct 	 r_tty *RTP;   	/* pointer to r_tty struct */
++        char 	 *src;     	/* pointer to char buffer or unix buf struct */
++	int 	 status;	/* status of scsi command, if any */
++	int 	 spare[2];	/* */
++        } *UCOM;
++
++extern struct RCOM {			/* REMOTE command */
++	unsigned short op;
++	unsigned short device;
++	unsigned int spare[2];
++	} *RCOM;
++
++extern struct SCOM {                   /* SCSI command */
++	unsigned char  cdblen;	/* length of the cdb , typically 6 */
++        char device;		/* controller # */
++	unsigned addr;		/* src / dest address */
++	unsigned count;		/* number of bytes */
++	void *bp;		/* unix buffer pointer */
++	unsigned spare[2];	/* */
++        } *SCOM;
++
++
++struct cdb {
++	unsigned char op;	/* opcode field. */
++	unsigned lun : 3;	/* lun field. */
++	unsigned lad2 : 5;	/* logical address2 field */
++	unsigned char lad1;	/* logical address1 field */
++	unsigned char lad0;	/* logical address1 field */
++	unsigned char byte4;	/* typically, number of blks or 0 */
++	unsigned char byte5;	/* typically, control or 0 */
++	};
++
++struct initinfo {
++	unsigned char	buffer[24];
++};
++
++/* this is the structure where the scsi command is found */
++
++extern struct CDB {
++        struct cdb cdb;
++        } *CDB;
++
++
++/* misc. defines for scsi interface */
++
++#define NUMBLKS(p) p->byte4
++#define LUN(p) p->lun
++#define OP(p) p->op
++#define LAD(p, x) p->lad0 = x ; p->lad1 = ( x >> 8 ); p->lad2 = ( x >> 16 )
++#define DLEN(p,x) p->byte4 = x ; p->lad0 = ( x >> 8 )
++#define DLENL(p, x) p->byte4 = x ; p->lad0 = ( x >> 8 ); p->lad1 = ( x >> 16 )
++
++/* Generic scsi commands */
++
++#define SCSIRDY		0x0
++#define SCSIRECAL	0x1
++#define SCSISENSE	0x3
++#define SCSIFORMAT	0x4
++#define SCSITRKFORMAT	0x6	/* track format used only for floppy disk */
++#define SCSIREAD	0x8
++#define SCSIWRITE	0xA
++#define SCSISEEK	0xB
++#define SCSIINIT	0xC2			/* not generic */
++
++/* status of scsi device for each device controller */
++
++#define NUMPTRS	6
++#define DOPTR 0
++#define DIPTR 1
++#define COPTR 2
++#define SIPTR 3
++#define MOPTR 4
++#define MIPTR 5
++#define INPTR(x) (( x & 1 ) == 1)
++#define OUTPTR(x) (( x & 1 ) == 0)
++
++#define ZOMBIE	1
++#define ACTIVE	2
++#define DISC	4
++
++struct scstat {
++	unsigned char dir;
++	unsigned char msg;
++	void    *bp;
++	unsigned short	state;
++	short 	sctimeout;
++	short 	timer;
++	struct  pointer
++	{
++		long	address;
++		long	count;
++	} ptrs[NUMPTRS];
++};
++
++#define MAXCTLRS	8	/* MAX # of LOGICAL devices on scsi bus */
++#define TAPEADDR	7	/* cartridge address on scsi bus */
++
++/* controller types */
++#define OMTI		0	/* omti */
++#define	DTC		1	/* dtc */
++#define	EMX		2	/* emulex */
++
++/* length of valid data in initinfo */
++#define DTCINITLEN	10
++#define OMTIINITLEN	10
++#define EMXINITLEN	24
++
++extern struct scstat scdev[MAXCTLRS];
++
++struct r_tty {                  /* remote copy of the 'essential' part of
++                                   the tty struct */
++        unsigned short  iflag;	/* input modes */
++        unsigned short  oflag;	/* output modes */
++        unsigned short  cflag;	/* control modes */
++        unsigned short  lflag;	/* line discipline modes */
++        unsigned short  delct;	/* delimiter count */
++        unsigned short 	state;	/* internal state */
++        char 	*outbuf;     	/* pointer to this channel's output buffer */
++        short   oremote;        /* remote processor output ptr */
++        short   ojob;           /* job processor output ptr */
++        char 	*iptr;     	/* ptr to the last input char put in dyn.mem */
++	char	*lastint;	/* ptr of last int to unix */
++        char 	*maxin;    	/* = &rtp->ttyp->inbuf[INBUFSZ] */
++	char	*minin;		/* = &rtp->ttyp->inbuf[0] */
++	struct usart *usp;	/* ptr to the usart device */
++        char   	cc[NCC];	/* delimiter characters */
++        short 	charcnt;	/* Number of characters in input queue */
++        char 	echoptr;	/* pointer to last char put in echo queue */
++        char 	untilptr;	/* ptr to last char echoed from echo queue*/
++        char 	device;		/* tty number */
++        char 	ebuf[EBUFSZ];   /* echo que */
++        char _pad; /* not explicit in original source */
++        };
++
++extern struct r_tty *remtty;
++
++/* define physical locations in static memory for shared/common data */
++
++#define UCOMADDR 0xC00000
++#define RCOMADDR ( UCOMADDR + sizeof(struct UCOM ))
++#define SCOMADDR ( RCOMADDR + sizeof(struct RCOM ))
++#define CDBADDR  ( SCOMADDR + sizeof(struct SCOM ))
++#define REMTTYADDR (CDBADDR + MAXCTLRS * sizeof(struct CDB ))
++#define CONSADDR (REMTTYADDR + MAXUNITS * sizeof(struct r_tty))
++#define LEDSADDR (CONSADDR + sizeof(int))
++#define LASTRADDR (LEDSADDR + sizeof( short ))
++
++/* time duration for timers . units are clock ticks */
++
++#define ARBITTIME 	18000		/* 60*300 -  about 300 seconds */
++#define SELECTTIME	15
++#define RWTIME		15
++#define STATUSTIME	15
++#define INITTIME	15
++#define ZILLION		1000000
++
++/* default console */
++#define CONSOLE		(&remtty[0])
++
++/* Error codes. */
++#define		ESCTIMOUT	1
++#define		ETIMER		2
++#define		ETTYCMD		3
++#define		EUNEXP		4
++#define 	EWRONGINT	5
++#define		EACTIVE		6
++#define		ECTLRNUM	7
++#define		EPTRNUM		8
++#define		ESCERRS		9
++#define		ESAMEPTR	10
++
++/* start of boot */
++#define		BOOTSTART	0x808004
++
++/* controller status */
++#define		OKSTAT		0x00
++#define		OKMASK		0x03
++
++/* Error messages for scsi devices */
++
++struct emesg
++{
++	short enumber;
++	char *eptr;
++};
++
++extern void (*p20_job_serial_handler[MAXUNITS])(void *);
++extern void *p20_job_serial_args[MAXUNITS];
++
++#include <linux/completion.h>
++
++void p20_rcmd(unsigned short op, unsigned short device);
++extern struct completion p20_scsi_cmd_done[8];
++extern int p20_scsi_cmd_result;
++
+diff --git a/arch/m68k/include/asm/page.h b/arch/m68k/include/asm/page.h
+index a5993ad83ed8..c72e352d6fde 100644
+--- a/arch/m68k/include/asm/page.h
++++ b/arch/m68k/include/asm/page.h
+@@ -31,7 +31,7 @@ typedef struct { unsigned long pte; } pte_t;
+ typedef struct { unsigned long pgd; } pgd_t;
+ typedef struct { unsigned long pgprot; } pgprot_t;
+ 
+-#if defined(CONFIG_SUN3)
++#if defined(CONFIG_SUN3) || defined(CONFIG_PLEXUS)
+ /*
+  * Sun3 still uses the asm-generic/pgalloc.h code and thus needs this
+  * definition. It would be possible to unify Sun3 and ColdFire pgalloc and have
+diff --git a/arch/m68k/include/asm/page_mm.h b/arch/m68k/include/asm/page_mm.h
+index 363aa0f9ba8a..6bfa3cd4fe4f 100644
+--- a/arch/m68k/include/asm/page_mm.h
++++ b/arch/m68k/include/asm/page_mm.h
+@@ -64,7 +64,12 @@ static inline void clear_page(void *page)
+ 
+ extern unsigned long m68k_memoffset;
+ 
+-#ifndef CONFIG_SUN3
++#if defined(CONFIG_PLEXUS)
++
++#define __pa(x) ((unsigned long)(x))
++#define __va(x) ((void *)(unsigned long)(x))
++
++#elif !defined(CONFIG_SUN3)
+ 
+ #define WANT_PAGE_VIRTUAL
+ 
+diff --git a/arch/m68k/include/asm/pgalloc.h b/arch/m68k/include/asm/pgalloc.h
+index 24ca46d2e090..7ec94686f77f 100644
+--- a/arch/m68k/include/asm/pgalloc.h
++++ b/arch/m68k/include/asm/pgalloc.h
+@@ -10,6 +10,8 @@
+ #include <asm/virtconvert.h>
+ #if defined(CONFIG_COLDFIRE)
+ #include <asm/mcf_pgalloc.h>
++#elif defined(CONFIG_PLEXUS)
++#include <asm/plexus_pgalloc.h>
+ #elif defined(CONFIG_SUN3)
+ #include <asm/sun3_pgalloc.h>
+ #else
+diff --git a/arch/m68k/include/asm/pgtable_mm.h b/arch/m68k/include/asm/pgtable_mm.h
+index dbdf1c2b2f66..cc3c8fbae48b 100644
+--- a/arch/m68k/include/asm/pgtable_mm.h
++++ b/arch/m68k/include/asm/pgtable_mm.h
+@@ -3,7 +3,7 @@
+ #define _M68K_PGTABLE_H
+ 
+ 
+-#if defined(CONFIG_SUN3) || defined(CONFIG_COLDFIRE)
++#if defined(CONFIG_SUN3) || defined(CONFIG_COLDFIRE) || defined(CONFIG_PLEXUS)
+ #include <asm-generic/pgtable-nopmd.h>
+ #else
+ #include <asm-generic/pgtable-nopud.h>
+@@ -35,13 +35,15 @@
+ /* PMD_SHIFT determines the size of the area a second-level page table can map */
+ #if CONFIG_PGTABLE_LEVELS == 3
+ #define PMD_SHIFT	18
+-#endif
+ #define PMD_SIZE	(1UL << PMD_SHIFT)
+ #define PMD_MASK	(~(PMD_SIZE-1))
++#endif
+ 
+ /* PGDIR_SHIFT determines what a third-level page table entry can map */
+ #ifdef CONFIG_SUN3
+ #define PGDIR_SHIFT     17
++#elif defined(CONFIG_PLEXUS)
++#define PGDIR_SHIFT     23
+ #elif defined(CONFIG_COLDFIRE)
+ #define PGDIR_SHIFT     22
+ #else
+@@ -59,6 +61,11 @@
+ #define __PAGETABLE_PMD_FOLDED 1
+ #define PTRS_PER_PMD   1
+ #define PTRS_PER_PGD   2048
++#elif defined(CONFIG_PLEXUS)
++#define PTRS_PER_PTE	2048
++#define __PAGETABLE_PMD_FOLDED 1
++#define PTRS_PER_PMD	1
++#define PTRS_PER_PGD	1
+ #elif defined(CONFIG_COLDFIRE)
+ #define PTRS_PER_PTE	512
+ #define __PAGETABLE_PMD_FOLDED 1
+@@ -75,6 +82,10 @@
+ #ifdef CONFIG_SUN3
+ #define KMAP_START	0x0dc00000
+ #define KMAP_END	0x0e000000
++#elif defined(CONFIG_PLEXUS)
++/* KMAP not used */
++//#define KMAP_START	0x00400000
++//#define KMAP_END	0x0e000000
+ #elif defined(CONFIG_COLDFIRE)
+ #define KMAP_START	0xe0000000
+ #define KMAP_END	0xf0000000
+@@ -90,6 +101,10 @@
+ extern unsigned long m68k_vmalloc_end;
+ #define VMALLOC_START 0x0f800000
+ #define VMALLOC_END m68k_vmalloc_end
++#elif defined(CONFIG_PLEXUS)
++/* Fairly arbitrary - this keeps it out of the way of the SCSI BLK region */
++#define VMALLOC_START   0x00400000
++#define VMALLOC_END     0x00600000
+ #elif defined(CONFIG_COLDFIRE)
+ #define VMALLOC_START	0xd0000000
+ #define VMALLOC_END	0xe0000000
+@@ -151,6 +166,8 @@ static inline void update_mmu_cache_range(struct vm_fault *vmf,
+ 
+ #ifdef CONFIG_SUN3
+ #include <asm/sun3_pgtable.h>
++#elif defined(CONFIG_PLEXUS)
++#include <asm/plexus_pgtable.h>
+ #elif defined(CONFIG_COLDFIRE)
+ #include <asm/mcf_pgtable.h>
+ #else
+@@ -163,6 +180,8 @@ static inline void update_mmu_cache_range(struct vm_fault *vmf,
+  */
+ #ifdef CONFIG_COLDFIRE
+ # define pgprot_noncached(prot) (__pgprot(pgprot_val(prot) | CF_PAGE_NOCACHE))
++#elif defined(CONFIG_PLEXUS)
++# define pgprot_noncached(prot) (prot)
+ #else
+ #ifdef SUN3_PAGE_NOCACHE
+ # define __SUN3_PAGE_NOCACHE	SUN3_PAGE_NOCACHE
+diff --git a/arch/m68k/include/asm/plexus.h b/arch/m68k/include/asm/plexus.h
+new file mode 100644
+index 000000000000..072489703b7c
+--- /dev/null
++++ b/arch/m68k/include/asm/plexus.h
+@@ -0,0 +1,36 @@
++/*
++ * plexus.h -- Linux/Plexus definitions
++ *
++ * Paul Brook
++ *
++ * This file is subject to the terms and conditions of the GNU General Public
++ * License.  See the file COPYING in the main directory of this archive for
++ * more details.
++ */
++
++#ifndef PLEXUS_H
++#define PLEXUS_H
++
++extern void plexus_init_IRQ (void);
++
++#define plexus_clock_ack_reg    ((unsigned short __iomem *)0xe000e0)
++#define plexus_job_ack_reg      ((unsigned short __iomem *)0xe00060)
++#define plexus_dma_int_reg      ((unsigned short __iomem *)0xe000c0)
++
++#define plexus_misc_reg         ((unsigned short __iomem *)0xe00016)
++#define plexus_kill_reg         ((unsigned short __iomem *)0xe00018)
++#define plexus_mapid_reg        ((unsigned short __iomem *)0xe0001e)
++
++#define plexus_mapper_ram       ((unsigned long __iomem *)0x900000)
++#define plexus_mapper_sys_ram   ((unsigned long __iomem *)0x902000)
++
++#define SCSI_BLK_ADDR_START      0x600000
++
++int plexus_tlb_miss(unsigned long addr, int write);
++
++#define PLEXUS_MISC_CINTJ_EN 0x0004
++
++#define PLEXUS_INT_CLOCK    0x83
++#define PLEXUS_INT_JOB      0xc1
++
++#endif /* PLEXUS_H */
+diff --git a/arch/m68k/include/asm/plexus_pgalloc.h b/arch/m68k/include/asm/plexus_pgalloc.h
+new file mode 100644
+index 000000000000..8077bc48de19
+--- /dev/null
++++ b/arch/m68k/include/asm/plexus_pgalloc.h
+@@ -0,0 +1,63 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/* plexus3_pgalloc.h --
++ */
++
++#ifndef _PLEXUS_PGALLOC_H
++#define _PLEXUS_PGALLOC_H
++
++#include <asm/tlb.h>
++
++#define __HAVE_ARCH_PTE_ALLOC_ONE_KERNEL
++#define __HAVE_ARCH_PTE_ALLOC_ONE
++#define __HAVE_ARCH_PGD_FREE
++#include <asm-generic/pgalloc.h>
++
++static inline void __pte_free_tlb(struct mmu_gather *tlb, pgtable_t pgtable,
++				  unsigned long address)
++{
++	struct ptdesc *ptdesc = page_ptdesc(pgtable);
++
++	pagetable_pte_dtor(ptdesc);
++	pagetable_free(ptdesc);
++}
++
++static inline void pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd, pte_t *pte)
++{
++        BUG();
++}
++
++static inline void pmd_populate(struct mm_struct *mm, pmd_t *pmd, pgtable_t page)
++{
++	pmd_val(*pmd) = __pa((unsigned long)page_address(page));
++}
++
++static inline pte_t *pte_alloc_one_kernel(struct mm_struct *mm)
++{
++    BUG();
++}
++
++static inline pgtable_t pte_alloc_one(struct mm_struct *mm)
++{
++     struct ptdesc *ptdesc = pagetable_alloc(GFP_PGTABLE_KERNEL, 1);
++     pte_t *pte;
++     int i;
++     pte = ptdesc_address(ptdesc);
++     for (i = 0; i < PTRS_PER_PTE; i++) {
++         pte_val(pte[i]) = PLEXUS_PAGE_NONE;
++     }
++     return ptdesc_page(ptdesc);
++}
++
++static inline pgd_t *pgd_alloc(struct mm_struct *mm)
++{
++     pgd_t *pgd;
++     pgd = mm->context.pgd;
++     pgd_val(*pgd) = 0;
++     return pgd;
++}
++
++static inline void pgd_free(struct mm_struct *mm, pgd_t *pgd)
++{
++}
++
++#endif /* PLEXUS_PGALLOC_H */
+diff --git a/arch/m68k/include/asm/plexus_pgtable.h b/arch/m68k/include/asm/plexus_pgtable.h
+new file mode 100644
+index 000000000000..0366c795306a
+--- /dev/null
++++ b/arch/m68k/include/asm/plexus_pgtable.h
+@@ -0,0 +1,146 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _PLEXUS_PGTABLE_H
++#define _PLEXUS_PGTABLE_H
++
++#ifndef __ASSEMBLY__
++#include <asm/virtconvert.h>
++#include <linux/linkage.h>
++
++/*
++ * This file contains all the things which change drastically for the plexus
++ * pagetable stuff, to avoid making too much of a mess of the generic m68k
++ * `pgtable.h'; this should only be included from the generic file. --m
++ */
++
++#endif	/* !__ASSEMBLY__ */
++
++#define USER_PGTABLES_CEILING TASK_SIZE
++
++#define PLEXUS_PAGE_PFNUM       0x00001fff
++#define PLEXUS_PAGE_NORD        0x00008000
++#define PLEXUS_PAGE_NOWR        0x00004000
++#define PLEXUS_PAGE_NOEX        0x00002000
++#define PLEXUS_PAGE_REF         0x00020000
++#define PLEXUS_PAGE_MOD         0x00010000
++#define PLEXUS_PAGE_UID         0xff000000
++
++#define PLEXUS_PAGE_VALID       0x0000e000
++#define PLEXUS_PAGE_NONE        (PLEXUS_PAGE_VALID | PLEXUS_PAGE_PFNUM)
++#define PLEXUS_PAGE_SWP_EXCLUSIVE 0x40000000
++
++#ifndef __ASSEMBLY__
++
++#define PAGE_KERNEL __pgprot(0)
++
++#define PLEXUS_PAGE_CHG_MASK (PLEXUS_PAGE_PFNUM | PLEXUS_PAGE_REF | PLEXUS_PAGE_MOD)
++
++/*
++ * Conversion functions: convert a page and protection to a page entry,
++ * and a page entry and page directory to the page they refer to.
++ */
++#define mk_pte(page, pgprot) pfn_pte(page_to_pfn(page), (pgprot))
++
++static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
++{
++	pte_val(pte) = (pte_val(pte) & PLEXUS_PAGE_CHG_MASK) | pgprot_val(newprot);
++	return pte;
++}
++
++static inline unsigned long pmd_page_vaddr(pmd_t pmd)
++{
++	return (unsigned long)__va(pmd_val(pmd) & PAGE_MASK);
++}
++
++static inline int pte_none (pte_t pte) { return pte_val (pte) == PLEXUS_PAGE_NONE; }
++static inline int pte_present (pte_t pte) { return (pte_val (pte) & PLEXUS_PAGE_VALID) != PLEXUS_PAGE_VALID; }
++static inline void pte_clear (struct mm_struct *mm, unsigned long addr, pte_t *ptep)
++{
++	pte_val (*ptep) = PLEXUS_PAGE_NONE;
++}
++
++#define PFN_PTE_SHIFT		0
++#define pte_pfn(pte)            (pte_val(pte) & PLEXUS_PAGE_PFNUM)
++#define pfn_pte(pfn, pgprot) \
++({ pte_t __pte; pte_val(__pte) = ((pfn) | pgprot_val(pgprot)); __pte; })
++
++#define pte_page(pte)		virt_to_page(__va(pte_pfn(pte)))
++
++#define pmd_pfn(pmd)		(pmd_val(pmd) >> PAGE_SHIFT)
++#define pmd_page(pmd)		virt_to_page((void *)pmd_page_vaddr(pmd))
++
++static inline int pmd_none2 (pmd_t *pmd) { return !pmd_val (*pmd); }
++#define pmd_none(pmd) pmd_none2(&(pmd))
++static inline int pmd_bad2 (pmd_t *pmd) { return 0; }
++#define pmd_bad(pmd) pmd_bad2(&(pmd))
++#define pmd_present(pmd) (!pmd_none2(&(pmd)))
++static inline void pmd_clear (pmd_t *pmdp) { pmd_val (*pmdp) = 0; }
++
++
++#define pte_ERROR(e) \
++	pr_err("%s:%d: bad pte %08lx.\n", __FILE__, __LINE__, pte_val(e))
++#define pgd_ERROR(e) \
++	pr_err("%s:%d: bad pgd %08lx.\n", __FILE__, __LINE__, pgd_val(e))
++
++
++/*
++ * The following only work if pte_present() is true.
++ * Undefined behaviour if not...
++ * [we have the full set here even if they don't change from m68k]
++ */
++static inline int pte_write(pte_t pte)		{ return (pte_val(pte) & PLEXUS_PAGE_NOWR) == 0; }
++static inline int pte_dirty(pte_t pte)		{ return pte_val(pte) & PLEXUS_PAGE_MOD; }
++static inline int pte_young(pte_t pte)		{ return pte_val(pte) & PLEXUS_PAGE_REF; }
++
++static inline pte_t pte_wrprotect(pte_t pte)	{ pte_val(pte) |= PLEXUS_PAGE_NOWR; return pte; }
++static inline pte_t pte_mkclean(pte_t pte)	{ pte_val(pte) &= ~PLEXUS_PAGE_MOD; return pte; }
++static inline pte_t pte_mkold(pte_t pte)	{ pte_val(pte) &= ~PLEXUS_PAGE_REF; return pte; }
++static inline pte_t pte_mkwrite_novma(pte_t pte){ pte_val(pte) &= ~PLEXUS_PAGE_NOWR; return pte; }
++static inline pte_t pte_mkdirty(pte_t pte)	{ pte_val(pte) |= PLEXUS_PAGE_MOD; return pte; }
++static inline pte_t pte_mkyoung(pte_t pte)	{ pte_val(pte) |= PLEXUS_PAGE_REF; return pte; }
++#if 0
++static inline pte_t pte_mknocache(pte_t pte)	{ pte_val(pte) |= SUN3_PAGE_NOCACHE; return pte; }
++// use this version when caches work...
++//static inline pte_t pte_mkcache(pte_t pte)	{ pte_val(pte) &= SUN3_PAGE_NOCACHE; return pte; }
++// until then, use:
++static inline pte_t pte_mkcache(pte_t pte)	{ return pte; }
++#endif
++
++extern pgd_t swapper_pg_dir[PTRS_PER_PGD];
++
++/*
++ * Encode/decode swap entries and swap PTEs. Swap PTEs are all PTEs that
++ * are !pte_none() && !pte_present().
++ *
++ * FIXME: These only exist in the sofrtware pagetables, not mapper ram, so
++ * we could use the reserved/unimpleented bits
++ * Format of swap PTEs:
++ *
++ * 1etttttt________111ooooooooooooo
++ */
++
++#define __swp_type(x)		(((x).val >> 24) & 0x3f)
++#define __swp_offset(x)		(((x).val) & PLEXUS_PAGE_PFNUM)
++#define __swp_entry(type, offset) ((swp_entry_t) { ((((type) & 0x3f) << 24) | 0x80000000 | \
++						   ((offset) & PLEXUS_PAGE_PFNUM)) })
++#define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
++#define __swp_entry_to_pte(x)	((pte_t) { (x).val })
++
++static inline int pte_swp_exclusive(pte_t pte)
++{
++	return pte_val(pte) & PLEXUS_PAGE_SWP_EXCLUSIVE;
++}
++
++static inline pte_t pte_swp_mkexclusive(pte_t pte)
++{
++	pte_val(pte) |= PLEXUS_PAGE_SWP_EXCLUSIVE;
++	return pte;
++}
++
++static inline pte_t pte_swp_clear_exclusive(pte_t pte)
++{
++	pte_val(pte) &= ~PLEXUS_PAGE_SWP_EXCLUSIVE;
++	return pte;
++}
++
++#endif	/* !__ASSEMBLY__ */
++#endif	/* !_PLEXUS_PGTABLE_H */
+diff --git a/arch/m68k/include/asm/processor.h b/arch/m68k/include/asm/processor.h
+index 7a2da780830b..fa80d3b1dd24 100644
+--- a/arch/m68k/include/asm/processor.h
++++ b/arch/m68k/include/asm/processor.h
+@@ -46,6 +46,8 @@ static inline void wrusp(unsigned long usp)
+ #define TASK_SIZE	(0xC0000000UL)
+ #elif defined(CONFIG_SUN3)
+ #define TASK_SIZE	(0x0E000000UL)
++#elif defined(CONFIG_PLEXUS)
++#define TASK_SIZE	(0x00800000UL)
+ #else
+ #define TASK_SIZE	(0xF0000000UL)
+ #endif
+@@ -64,6 +66,8 @@ static inline void wrusp(unsigned long usp)
+ #ifdef CONFIG_MMU
+ #if defined(CONFIG_COLDFIRE)
+ #define TASK_UNMAPPED_BASE	0x60000000UL
++#elif defined(CONFIG_PLEXUS)
++#define TASK_UNMAPPED_BASE	0x00400000UL
+ #elif defined(CONFIG_SUN3)
+ #define TASK_UNMAPPED_BASE	0x0A000000UL
+ #else
+diff --git a/arch/m68k/include/asm/setup.h b/arch/m68k/include/asm/setup.h
+index 2c99477aaf89..dc747c4e69ce 100644
+--- a/arch/m68k/include/asm/setup.h
++++ b/arch/m68k/include/asm/setup.h
+@@ -215,6 +215,12 @@ extern unsigned long vme_brdtype;
+ extern int m68k_is040or060;
+ #endif /* !__ASSEMBLY__ */
+ 
++#if !defined(CONFIG_M68010)
++#  define CPU_IS_010 (0)
++#else
++#  define CPU_IS_010 (1)
++#endif
++
+ #if !defined(CONFIG_M68020)
+ #  define CPU_IS_020 (0)
+ #  define MMU_IS_851 (0)
+diff --git a/arch/m68k/include/asm/tlbflush.h b/arch/m68k/include/asm/tlbflush.h
+index b882e2f4f551..0803aa900a1c 100644
+--- a/arch/m68k/include/asm/tlbflush.h
++++ b/arch/m68k/include/asm/tlbflush.h
+@@ -3,7 +3,65 @@
+ #define _M68K_TLBFLUSH_H
+ 
+ #ifdef CONFIG_MMU
+-#ifndef CONFIG_SUN3
++#if defined(CONFIG_PLEXUS)
++
++#include <asm/plexus.h>
++
++void plexus_allocate_mapid(struct mm_struct *mm);
++void plexus_release_mapid(int mapid);
++
++// Not actually used anywhere?
++// Presumably made obsolete by the _kernel variants
++
++#if 0
++static inline void flush_tlb_all(void)
++{
++    BUG();
++}
++#endif
++
++/* Clear user TLB entries within the context named in mm */
++static inline void flush_tlb_mm (struct mm_struct *mm)
++{
++    int mapid = mm->context.mapid;
++    if (mapid >= 0) {
++        /* Burn our currnt mapid */
++        plexus_release_mapid(mapid);
++        /* If this is the currently active mm, then immediately get a new mapid */
++        if (mapid == __raw_readw(plexus_mapid_reg)) {
++            plexus_allocate_mapid(mm);
++            __raw_writew(mm->context.mapid, plexus_mapid_reg);
++        }
++    }
++}
++
++/* Flush a single TLB page */
++static inline void flush_tlb_page (struct vm_area_struct *vma,
++				   unsigned long addr)
++{
++    /* Might push someone else's page out of the TLB.  Good enough. */
++    if (vma->vm_mm->context.mapid >= 0 && addr < TASK_SIZE) {
++        __raw_writel(PLEXUS_PAGE_NONE, &plexus_mapper_ram[addr >> PAGE_SHIFT]);
++    }
++}
++/* Flush a range of pages from TLB. */
++static inline void flush_tlb_range (struct vm_area_struct *vma,
++		      unsigned long start, unsigned long end)
++{
++    /* Don't bother being clever, just invalidate the whole address space */
++    flush_tlb_mm(vma->vm_mm);
++}
++
++// Kernel uses the mapper directly, so nothing to do.
++static inline void flush_tlb_kernel_range(unsigned long start, unsigned long end)
++{
++}
++
++static inline void flush_tlb_kernel_page (unsigned long addr)
++{
++}
++
++#elif !defined(CONFIG_SUN3) 
+ 
+ #include <asm/current.h>
+ #include <asm/mcfmmu.h>
+diff --git a/arch/m68k/include/asm/traps.h b/arch/m68k/include/asm/traps.h
+index a9d5c1c870d3..01a175180ef4 100644
+--- a/arch/m68k/include/asm/traps.h
++++ b/arch/m68k/include/asm/traps.h
+@@ -201,6 +201,15 @@ asmlinkage void bad_inthandler(void);
+ #define MMU060_ERR_BITS (MMU060_PBE | MMU060_SBE | MMU060_DESC_ERR | MMU060_SP | \
+ 			 MMU060_WP  | MMU060_TWE | MMU060_RE       | MMU060_WE)
+ 
++/* Bits for 68010 special status word */
++#define SSW_RW_010 0x0100
++#define SSW_BY_010 0x0200
++#define SSW_HB_010 0x0400
++#define SSW_RM_010 0x0800
++#define SSW_DF_010 0x1000
++#define SSW_IF_010 0x2000
++#define SSW_RR_010 0x8000
++
+ /* structure for stack frames */
+ 
+ struct frame {
+@@ -233,6 +242,17 @@ struct frame {
+ 		    unsigned long  pd2;      /* push data 2*/
+ 		    unsigned long  pd3;      /* push data 3*/
+ 	    } fmt7;
++	    struct {
++		    unsigned short ssw;      /* special status word */
++		    unsigned long  faddr;    /* fault address */
++		    unsigned short res1;     /* reserved */
++		    unsigned short dob;      /* data output buffer */
++		    unsigned short res2;     /* reserved */
++		    unsigned short dib;      /* data input buffer */
++		    unsigned short res3;     /* reserved */
++		    unsigned short iib;      /* instruction input buffer */
++		    unsigned long  int1[16]; /* internal registers */
++	    } fmt8;
+ 	    struct {
+ 		    unsigned long  iaddr;    /* instruction address */
+ 		    unsigned short int1[4];  /* internal registers */
+diff --git a/arch/m68k/include/uapi/asm/bootinfo.h b/arch/m68k/include/uapi/asm/bootinfo.h
+index 024e87d7095f..bfcfef823786 100644
+--- a/arch/m68k/include/uapi/asm/bootinfo.h
++++ b/arch/m68k/include/uapi/asm/bootinfo.h
+@@ -91,6 +91,7 @@ struct mem_info {
+ #define MACH_M54XX		12
+ #define MACH_M5441X		13
+ #define MACH_VIRT		14
++#define MACH_PLEXUS		15
+ 
+ 
+     /*
+@@ -109,12 +110,14 @@ struct mem_info {
+ #define CPUB_68040		2
+ #define CPUB_68060		3
+ #define CPUB_COLDFIRE		4
++#define CPUB_68010		5
+ 
+ #define CPU_68020		(1 << CPUB_68020)
+ #define CPU_68030		(1 << CPUB_68030)
+ #define CPU_68040		(1 << CPUB_68040)
+ #define CPU_68060		(1 << CPUB_68060)
+ #define CPU_COLDFIRE		(1 << CPUB_COLDFIRE)
++#define CPU_68010		(1 << CPUB_68010)
+ 
+ #define FPUB_68881		0
+ #define FPUB_68882		1
+@@ -123,6 +126,7 @@ struct mem_info {
+ #define FPUB_SUNFPA		4	/* Sun-3 FPA */
+ #define FPUB_COLDFIRE		5	/* ColdFire FPU */
+ 
++#define FPU_NONE                0
+ #define FPU_68881		(1 << FPUB_68881)
+ #define FPU_68882		(1 << FPUB_68882)
+ #define FPU_68040		(1 << FPUB_68040)
+@@ -137,6 +141,7 @@ struct mem_info {
+ #define MMUB_APOLLO		4	/* Custom Apollo */
+ #define MMUB_SUN3		5	/* Custom Sun-3 */
+ #define MMUB_COLDFIRE		6	/* Internal MMU */
++#define MMUB_PLEXUS		7	/* Custom Plexus */
+ 
+ #define MMU_68851		(1 << MMUB_68851)
+ #define MMU_68030		(1 << MMUB_68030)
+@@ -145,6 +150,7 @@ struct mem_info {
+ #define MMU_SUN3		(1 << MMUB_SUN3)
+ #define MMU_APOLLO		(1 << MMUB_APOLLO)
+ #define MMU_COLDFIRE		(1 << MMUB_COLDFIRE)
++#define MMU_PLEXUS		(1 << MMUB_PLEXUS)
+ 
+ 
+     /*
+diff --git a/arch/m68k/kernel/Makefile b/arch/m68k/kernel/Makefile
+index af015447dfb4..049cd229819f 100644
+--- a/arch/m68k/kernel/Makefile
++++ b/arch/m68k/kernel/Makefile
+@@ -15,12 +15,14 @@ obj-$(CONFIG_Q40)	:= head.o
+ obj-$(CONFIG_SUN3X)	:= head.o
+ obj-$(CONFIG_VIRT)	:= head.o
+ obj-$(CONFIG_SUN3)	:= sun3-head.o
++obj-$(CONFIG_PLEXUS)	:= plexus-head.o
+ 
+ obj-y	+= entry.o irq.o module.o process.o ptrace.o
+ obj-y	+= setup.o signal.o sys_m68k.o syscalltable.o time.o traps.o
+ 
+ obj-$(CONFIG_MMU_MOTOROLA) += ints.o vectors.o
+ obj-$(CONFIG_MMU_SUN3) += ints.o vectors.o
++obj-$(CONFIG_MMU_PLEXUS) += ints.o vectors.o
+ obj-$(CONFIG_PCI) += pcibios.o
+ 
+ obj-$(CONFIG_HAS_DMA)	+= dma.o
+diff --git a/arch/m68k/kernel/dma.c b/arch/m68k/kernel/dma.c
+index 2e192a5df949..161125ed5531 100644
+--- a/arch/m68k/kernel/dma.c
++++ b/arch/m68k/kernel/dma.c
+@@ -17,7 +17,7 @@
+ 
+ #include <asm/cacheflush.h>
+ 
+-#if defined(CONFIG_MMU) && !defined(CONFIG_COLDFIRE)
++#if defined(CONFIG_MMU) && !(defined(CONFIG_COLDFIRE) || defined(CONFIG_PLEXUS))
+ void arch_dma_prep_coherent(struct page *page, size_t size)
+ {
+ 	cache_push(page_to_phys(page), size);
+@@ -56,7 +56,7 @@ void arch_dma_free(struct device *dev, size_t size, void *vaddr,
+ 	free_pages((unsigned long)vaddr, get_order(size));
+ }
+ 
+-#endif /* CONFIG_MMU && !CONFIG_COLDFIRE */
++#endif /* CONFIG_MMU && !(CONFIG_COLDFIRE || CONFIG_PLEXUS) */
+ 
+ void arch_sync_dma_for_device(phys_addr_t handle, size_t size,
+ 		enum dma_data_direction dir)
+diff --git a/arch/m68k/kernel/early_printk.c b/arch/m68k/kernel/early_printk.c
+index 7d3fe08a48eb..63ee5c53f00c 100644
+--- a/arch/m68k/kernel/early_printk.c
++++ b/arch/m68k/kernel/early_printk.c
+@@ -60,6 +60,7 @@ static int __init unregister_early_console(void)
+ 	if (!early_console || MACH_IS_MVME16x)
+ 		return 0;
+ 
++        return 0;
+ 	return unregister_console(early_console);
+ }
+ late_initcall(unregister_early_console);
+diff --git a/arch/m68k/kernel/entry.S b/arch/m68k/kernel/entry.S
+index 2e1e9ad4f98c..7f6fd553039a 100644
+--- a/arch/m68k/kernel/entry.S
++++ b/arch/m68k/kernel/entry.S
+@@ -220,7 +220,27 @@ ENTRY(system_call)
+ 	cmpl	#NR_syscalls,%d0
+ 	jcc	badsys
+ syscall:
++#ifdef CONFIG_M68010
++#if 0
++    pea 1f
++        subql #4, %sp
++        movel %a0, %sp@-
++        add.l %d0,%d0
++        add.l %d0,%d0
++        lea sys_call_table,%a0
++        move.l (%a0,%d0.l),%sp@(4)
++        movel %sp@+,%a0
++        rts
++1:
++#endif
++        add.l %d0,%d0
++        add.l %d0,%d0
++        lea sys_call_table,%a0
++        move.l (%a0,%d0.l),%a0
++        jsr (%a0)
++#else
+ 	jbsr	@(sys_call_table,%d0:l:4)@(0)
++#endif
+ 	movel	%d0,%sp@(PT_OFF_D0)	| save the return value
+ ret_from_syscall:
+ 	|oriw	#0x0700,%sr
+@@ -270,7 +290,7 @@ do_signal_return:
+ 	subql	#4,%sp			| dummy return address
+ 	SAVE_SWITCH_STACK
+ 	pea	%sp@(SWITCH_STACK_SIZE)
+-	bsrl	do_notify_resume
++	jbsr	do_notify_resume
+ 	addql	#4,%sp
+ 	RESTORE_SWITCH_STACK
+ 	addql	#4,%sp
+@@ -293,7 +313,13 @@ ENTRY(auto_inthandler)
+ 	SAVE_ALL_INT
+ 	GET_CURRENT(%d0)
+ 					|  put exception # in d0
++#ifdef CONFIG_M68010
++	move.w	%sp@(PT_OFF_FORMATVEC),%d0
++        lsr.w   #2,%d0
++        andi.l  #0x3ff,%d0
++#else
+ 	bfextu	%sp@(PT_OFF_FORMATVEC){#4,#10},%d0
++#endif
+ 	subw	#VEC_SPUR,%d0
+ 
+ 	movel	%sp,%sp@-
+@@ -309,7 +335,13 @@ ENTRY(user_inthandler)
+ 	SAVE_ALL_INT
+ 	GET_CURRENT(%d0)
+ 					|  put exception # in d0
++#ifdef CONFIG_M68010
++	move.w	%sp@(PT_OFF_FORMATVEC),%d0
++        lsr.w   #2,%d0
++        andi.l  #0x3ff,%d0
++#else
+ 	bfextu	%sp@(PT_OFF_FORMATVEC){#4,#10},%d0
++#endif
+ user_irqvec_fixup = . + 2
+ 	subw	#VEC_USER,%d0
+ 
+@@ -356,7 +388,7 @@ resume:
+ 	movel	%sp,%a0@(TASK_THREAD+THREAD_KSP)
+ 
+ 	/* save floating point context */
+-#ifndef CONFIG_M68KFPU_EMU_ONLY
++#if defined(CONFIG_FPU) && !defined(CONFIG_M68KFPU_EMU_ONLY)
+ #ifdef CONFIG_M68KFPU_EMU
+ 	tstl	m68k_fputype
+ 	jeq	3f
+@@ -390,7 +422,7 @@ resume:
+ 	movel	%a1,%curptr
+ 
+ 	/* restore floating point context */
+-#ifndef CONFIG_M68KFPU_EMU_ONLY
++#if defined(CONFIG_FPU) && !defined(CONFIG_M68KFPU_EMU_ONLY)
+ #ifdef CONFIG_M68KFPU_EMU
+ 	tstl	m68k_fputype
+ 	jeq	4f
+diff --git a/arch/m68k/kernel/plexus-head.S b/arch/m68k/kernel/plexus-head.S
+new file mode 100644
+index 000000000000..4d5c9e096f26
+--- /dev/null
++++ b/arch/m68k/kernel/plexus-head.S
+@@ -0,0 +1,72 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#include <linux/linkage.h>
++#include <linux/init.h>
++
++#include <asm/entry.h>
++#include <asm/page.h>
++#include <asm/contregs.h>
++
++	__HEAD
++ENTRY(_stext)
++ENTRY(_start)
++/* Firstly, make sure interrupts are disabled. */
++	movew	#0x2700, %sr
++
++    /* Make ourself writable */
++        movel #_end, %d0
++        addil #0xfff, %d0
++        moveq #12,%d1
++        lsr.l %d1,%d0
++        lea (0x902000),%a0
++1:
++        bclr.b #6, %a0@(2)
++        addl #4,%a0
++        dbf %d0,1b
++
++
++/* Save bootrom parameters */
++        movel  %sp@(0), plexus_boot_pageno
++        movel  %sp@(4), plexus_boot_memsize
++
++1:	lea	init_task,%curptr			| get initial thread...
++	lea	init_thread_union+THREAD_SIZE,%sp	| ...and its stack.
++
++
++	jbsr	plexus_init
++
++	jbsr	base_trap_init
++
++        jbsr    start_kernel
++	trap	#15
++
++#ifdef CONFIG_EARLY_PRINTK
++/*
++ *	This routine takes its parameters on the stack.  It then
++ *	turns around and calls the internal routines.  This routine
++ *	is used by the boot console.
++ *
++ *	The calling parameters are:
++ *		void debug_cons_nputs(const char *str, unsigned length)
++ *
++ *	This routine does NOT understand variable arguments only
++ *	simple strings!
++ */
++ENTRY(debug_cons_nputs)
++	moveml	%d0/%d1/%a0,%sp@-
++	movew	%sr,%sp@-
++	ori	#0x0700,%sr
++	movel	%sp@(18),%a0		/* fetch parameter */
++	movel	%sp@(22),%d1		/* fetch parameter */
++	jra	2f
++1:
++        movew   %d0, (0xe001fe)
++	subq	#1,%d1
++2:	jeq	3f
++	moveb	%a0@+,%d0
++	jne	1b
++3:
++	movew	%sp@+,%sr
++	moveml	%sp@+,%d0/%d1/%a0
++	rts
++#endif /* CONFIG_EARLY_PRINTK */
++
+diff --git a/arch/m68k/kernel/ptrace.c b/arch/m68k/kernel/ptrace.c
+index cd0172d29430..c5c91c02f9bd 100644
+--- a/arch/m68k/kernel/ptrace.c
++++ b/arch/m68k/kernel/ptrace.c
+@@ -276,6 +276,7 @@ asmlinkage int syscall_trace_enter(void)
+ {
+ 	int ret = 0;
+ 
++pr_info("syscall %ld\n", task_pt_regs(current)->d0);
+ 	if (test_thread_flag(TIF_SYSCALL_TRACE))
+ 		ret = ptrace_report_syscall_entry(task_pt_regs(current));
+ 
+diff --git a/arch/m68k/kernel/setup_mm.c b/arch/m68k/kernel/setup_mm.c
+index 6f1ae01f322c..1c93a77e436a 100644
+--- a/arch/m68k/kernel/setup_mm.c
++++ b/arch/m68k/kernel/setup_mm.c
+@@ -50,7 +50,7 @@
+ #include <asm/natfeat.h>
+ #include <asm/config.h>
+ 
+-#if !FPSTATESIZE || !NR_IRQS
++#if !(FPSTATESIZE || !defined(CONFIG_FPU)) || !NR_IRQS
+ #warning No CPU/platform type selected, your kernel will not work!
+ #warning Are you building an allnoconfig kernel?
+ #endif
+@@ -209,7 +209,7 @@ static void __init m68k_parse_bootinfo(const struct bi_record *record)
+ void __init setup_arch(char **cmdline_p)
+ {
+ 	/* The bootinfo is located right after the kernel */
+-	if (!CPU_IS_COLDFIRE)
++	if (!(CPU_IS_COLDFIRE || CONFIG_PLEXUS))
+ 		m68k_parse_bootinfo((const struct bi_record *)_end);
+ 
+ 	if (CPU_IS_040)
+@@ -322,6 +322,11 @@ void __init setup_arch(char **cmdline_p)
+ 	case MACH_VIRT:
+ 		config_virt();
+ 		break;
++#endif
++#ifdef CONFIG_PLEXUS
++	case MACH_PLEXUS:
++		config_plexus();
++		break;
+ #endif
+ 	default:
+ 		panic("No configuration setup");
+@@ -383,6 +388,7 @@ static int show_cpuinfo(struct seq_file *m, void *v)
+ #define LOOP_CYCLES_68040	(3)
+ #define LOOP_CYCLES_68060	(1)
+ #define LOOP_CYCLES_COLDFIRE	(2)
++#define LOOP_CYCLES_68010	(16)
+ 
+ 	if (CPU_IS_020) {
+ 		cpu = "68020";
+@@ -399,6 +405,9 @@ static int show_cpuinfo(struct seq_file *m, void *v)
+ 	} else if (CPU_IS_COLDFIRE) {
+ 		cpu = "ColdFire";
+ 		clockfactor = LOOP_CYCLES_COLDFIRE;
++	} else if (CPU_IS_010) {
++		cpu = "68010";
++		clockfactor = LOOP_CYCLES_68010;
+ 	} else {
+ 		cpu = "680x0";
+ 		clockfactor = 0;
+@@ -437,6 +446,8 @@ static int show_cpuinfo(struct seq_file *m, void *v)
+ 		mmu = "Apollo";
+ 	else if (m68k_mmutype & MMU_COLDFIRE)
+ 		mmu = "ColdFire";
++	else if (m68k_mmutype & MMU_PLEXUS)
++		mmu = "Plexus";
+ 	else
+ 		mmu = "unknown";
+ 
+diff --git a/arch/m68k/kernel/signal.c b/arch/m68k/kernel/signal.c
+index ba468b5f3f0b..6665f26c1e19 100644
+--- a/arch/m68k/kernel/signal.c
++++ b/arch/m68k/kernel/signal.c
+@@ -84,7 +84,12 @@ static const int frame_size_change[16] = {
+ 
+ static inline int frame_extra_sizes(int f)
+ {
+-	return frame_size_change[f];
++	int sz = frame_size_change[f];
++        if (sz < 0) {
++            pr_err("Unknown frame size\n");
++            BUG();
++        }
++        return sz;
+ }
+ 
+ int fixup_exception(struct pt_regs *regs)
+@@ -150,6 +155,8 @@ static inline void push_cache (unsigned long vaddr)
+ 				      "cpushl %%bc,(%0)\n\t"
+ 				      ".chip 68k"
+ 				      : : "a" (temp));
++        } else if (CPU_IS_010) {
++            /* No cache to flush */
+ 	} else if (!CPU_IS_COLDFIRE) {
+ 		/*
+ 		 * 68030/68020 have no writeback cache;
+diff --git a/arch/m68k/kernel/traps.c b/arch/m68k/kernel/traps.c
+index a700807c9b6d..fa6f41ef5898 100644
+--- a/arch/m68k/kernel/traps.c
++++ b/arch/m68k/kernel/traps.c
+@@ -1,3 +1,4 @@
++//#define DEBUG
+ /*
+  *  linux/arch/m68k/kernel/traps.c
+  *
+@@ -515,6 +516,7 @@ static inline void bus_error030 (struct frame *fp)
+ 			fp->ptregs.format == 0xa ? fp->ptregs.pc + 4 : fp->un.fmtb.baddr);
+ 	if (ssw & DF)
+ 		pr_debug("Data %s fault at %#010lx in %s (pc=%#lx)\n",
++
+ 			ssw & RW ? "read" : "write",
+ 			fp->un.fmtb.daddr,
+ 			space_names[ssw & DFC], fp->ptregs.pc);
+@@ -669,6 +671,41 @@ static inline void bus_error030 (struct frame *fp)
+ #endif /* CPU_M68020_OR_M68030 */
+ #endif /* !CONFIG_SUN3 */
+ 
++#if defined (CONFIG_M68010)
++#include <asm/plexus.h>
++
++static inline void access_error010 (struct frame *fp)
++{
++	unsigned short ssw = fp->un.fmt8.ssw;
++        unsigned long addr = fp->un.fmt8.faddr;
++        unsigned long errorcode = 0;
++        int need_fault;
++
++	pr_debug("ssw=0x%04x, fa=0x%06lx, pc=0x%06lx\n", ssw, addr, fp->ptregs.pc);
++
++        if (!(ssw & SSW_RW_010)) {
++                errorcode |= 2;
++        }
++	if (fp->ptregs.sr & PS_S) {
++		/* kernel fault must be a data fault to user space */
++		if ((ssw & DFC) != USER_DATA) {
++			pr_err("BAD KERNEL BUSERR at %lx\n", addr);
++
++			die_if_kernel("Oops", &fp->ptregs,0);
++			force_sig(SIGKILL);
++			return;
++		}
++	}
++
++        need_fault = plexus_tlb_miss(addr, (errorcode & 2) != 0);
++        if (need_fault) {
++            do_page_fault(&fp->ptregs, addr, errorcode);
++        } else {
++            pr_debug("TLB fill\n");
++        }
++}
++#endif
++
+ #if defined(CONFIG_COLDFIRE) && defined(CONFIG_MMU)
+ #include <asm/mcfmmu.h>
+ 
+@@ -792,6 +829,11 @@ asmlinkage void buserr_c(struct frame *fp)
+ 	  access_error040 (fp);
+ 	  break;
+ #endif
++#if defined (CONFIG_M68010)
++	case 0x8:			/* 68010 access error */
++	  access_error010 (fp);
++	  break;
++#endif
+ #if defined (CPU_M68020_OR_M68030)
+ 	case 0xa:
+ 	case 0xb:
+diff --git a/arch/m68k/kernel/vmlinux-plexus.lds b/arch/m68k/kernel/vmlinux-plexus.lds
+new file mode 100644
+index 000000000000..cb13df80981e
+--- /dev/null
++++ b/arch/m68k/kernel/vmlinux-plexus.lds
+@@ -0,0 +1,59 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/* ld script to make m68k Linux kernel */
++
++#include <asm-generic/vmlinux.lds.h>
++#include <asm/page.h>
++#include <asm/thread_info.h>
++
++OUTPUT_FORMAT("elf32-m68k", "elf32-m68k", "elf32-m68k")
++OUTPUT_ARCH(m68k)
++ENTRY(_start)
++jiffies = jiffies_64 + 4;
++SECTIONS
++{
++  . = 0x100;
++  _text = .;			/* Text and read-only data */
++  .text : {
++	HEAD_TEXT
++	TEXT_TEXT
++	IRQENTRY_TEXT
++	SOFTIRQENTRY_TEXT
++	SCHED_TEXT
++	LOCK_TEXT
++	*(.fixup)
++	*(.gnu.warning)
++	} :text = 0x4e75
++	RO_DATA(4096)
++
++  _etext = .;			/* End of text section */
++
++  . = ALIGN(PAGE_SIZE);	/* Init code and data */
++  _sdata = .;			/* Start of rw data section */
++  EXCEPTION_TABLE(16) :data
++  RW_DATA(16, PAGE_SIZE, THREAD_SIZE) :data
++  /* End of data goes *here* so that freeing init code works properly. */
++  _edata = .;
++
++  /* will be freed after init */
++  . = ALIGN(PAGE_SIZE);	/* Init code and data */
++__init_begin = .;
++	INIT_TEXT_SECTION(PAGE_SIZE)
++	INIT_DATA_SECTION(16)
++	.m68k_fixup : {
++		__start_fixup = .;
++		*(.m68k_fixup)
++		__stop_fixup = .;
++	}
++	. = ALIGN(PAGE_SIZE);
++	__init_end = .;
++
++  BSS_SECTION(0, 0, 0)
++
++  _end = . ;
++
++  STABS_DEBUG
++  ELF_DETAILS
++
++  /* Sections to be discarded */
++  DISCARDS
++}
+diff --git a/arch/m68k/kernel/vmlinux.lds.S b/arch/m68k/kernel/vmlinux.lds.S
+index d3d3c305ebc9..b8efb0df5bdd 100644
+--- a/arch/m68k/kernel/vmlinux.lds.S
++++ b/arch/m68k/kernel/vmlinux.lds.S
+@@ -7,6 +7,8 @@ PHDRS
+ }
+ #ifdef CONFIG_SUN3
+ #include "vmlinux-sun3.lds"
++#elif defined(CONFIG_PLEXUS)
++#include "vmlinux-plexus.lds"
+ #else
+ #include "vmlinux-std.lds"
+ #endif
+diff --git a/arch/m68k/lib/memcpy.c b/arch/m68k/lib/memcpy.c
+index c1e2dfb206f3..caf321598c8b 100644
+--- a/arch/m68k/lib/memcpy.c
++++ b/arch/m68k/lib/memcpy.c
+@@ -22,7 +22,7 @@ void *memcpy(void *to, const void *from, size_t n)
+ 		from = cfrom;
+ 		n--;
+ 	}
+-#if defined(CONFIG_M68000)
++#if defined(CONFIG_M68000) || defined(CONFIG_M68010)
+ 	if ((long)from & 1) {
+ 		char *cto = to;
+ 		const char *cfrom = from;
+@@ -43,7 +43,7 @@ void *memcpy(void *to, const void *from, size_t n)
+ 	if (temp) {
+ 		long *lto = to;
+ 		const long *lfrom = from;
+-#if defined(CONFIG_M68000) || defined(CONFIG_COLDFIRE)
++#if defined(CONFIG_M68000) || defined(CONFIG_M68010) || defined(CONFIG_COLDFIRE)
+ 		for (; temp; temp--)
+ 			*lto++ = *lfrom++;
+ #else
+diff --git a/arch/m68k/lib/memset.c b/arch/m68k/lib/memset.c
+index 8a7639f0a2fe..f946cf58ae10 100644
+--- a/arch/m68k/lib/memset.c
++++ b/arch/m68k/lib/memset.c
+@@ -32,7 +32,7 @@ void *memset(void *s, int c, size_t count)
+ 	temp = count >> 2;
+ 	if (temp) {
+ 		long *ls = s;
+-#if defined(CONFIG_M68000) || defined(CONFIG_COLDFIRE)
++#if defined(CONFIG_M68000) || defined(CONFIG_M68010) || defined(CONFIG_COLDFIRE)
+ 		for (; temp; temp--)
+ 			*ls++ = c;
+ #else
+diff --git a/arch/m68k/mm/Makefile b/arch/m68k/mm/Makefile
+index b3adb5253393..33e6813a6681 100644
+--- a/arch/m68k/mm/Makefile
++++ b/arch/m68k/mm/Makefile
+@@ -9,4 +9,3 @@ obj-$(CONFIG_MMU)		+= cache.o fault.o
+ obj-$(CONFIG_MMU_MOTOROLA)	+= kmap.o memory.o motorola.o hwtest.o
+ obj-$(CONFIG_MMU_SUN3)		+= sun3kmap.o sun3mmu.o hwtest.o
+ obj-$(CONFIG_MMU_COLDFIRE)	+= kmap.o memory.o mcfmmu.o
+-
+diff --git a/arch/m68k/mm/cache.c b/arch/m68k/mm/cache.c
+index dde978e66f14..40eb2bc215bb 100644
+--- a/arch/m68k/mm/cache.c
++++ b/arch/m68k/mm/cache.c
+@@ -78,7 +78,7 @@ void flush_icache_user_range(unsigned long address, unsigned long endaddr)
+ 				      : : "a" (virt_to_phys_slow(address)));
+ 			address += PAGE_SIZE;
+ 		} while (address < endaddr);
+-	} else {
++	} else if (!CPU_IS_010) {
+ 		unsigned long tmp;
+ 		asm volatile ("movec %%cacr,%0\n\t"
+ 			      "orw %1,%0\n\t"
+@@ -115,7 +115,7 @@ void flush_icache_user_page(struct vm_area_struct *vma, struct page *page,
+ 			      "cpushp %%bc,(%0)\n\t"
+ 			      ".chip 68k"
+ 			      : : "a" (page_to_phys(page)));
+-	} else {
++	} else if (!CPU_IS_010) {
+ 		unsigned long tmp;
+ 		asm volatile ("movec %%cacr,%0\n\t"
+ 			      "orw %1,%0\n\t"
+diff --git a/arch/m68k/mm/fault.c b/arch/m68k/mm/fault.c
+index c290c5c0cfb9..6ba07a09906c 100644
+--- a/arch/m68k/mm/fault.c
++++ b/arch/m68k/mm/fault.c
+@@ -1,3 +1,4 @@
++//#define DEBUG
+ // SPDX-License-Identifier: GPL-2.0
+ /*
+  *  linux/arch/m68k/mm/fault.c
+diff --git a/arch/m68k/mm/init.c b/arch/m68k/mm/init.c
+index 1b47bec15832..aebdd473b4b9 100644
+--- a/arch/m68k/mm/init.c
++++ b/arch/m68k/mm/init.c
+@@ -93,7 +93,7 @@ void free_initmem(void)
+ 
+ static inline void init_pointer_tables(void)
+ {
+-#if defined(CONFIG_MMU) && !defined(CONFIG_SUN3) && !defined(CONFIG_COLDFIRE)
++#if defined(CONFIG_MMU) && !defined(CONFIG_SUN3) && !defined(CONFIG_COLDFIRE) && !defined(CONFIG_PLEXUS)
+ 	int i, j;
+ 
+ 	/* insert pointer tables allocated so far into the tablelist */
+diff --git a/arch/m68k/plexus/Makefile b/arch/m68k/plexus/Makefile
+new file mode 100644
+index 000000000000..83c7c464f930
+--- /dev/null
++++ b/arch/m68k/plexus/Makefile
+@@ -0,0 +1,6 @@
++# SPDX-License-Identifier: GPL-2.0-only
++#
++# Makefile for Linux arch/m68k/plexus source directory
++#
++
++obj-$(CONFIG_PLEXUS) += config.o plexusints.o plexusmmu.o
+diff --git a/arch/m68k/plexus/config.c b/arch/m68k/plexus/config.c
+new file mode 100644
+index 000000000000..73f840684dda
+--- /dev/null
++++ b/arch/m68k/plexus/config.c
+@@ -0,0 +1,132 @@
++/*
++ *  linux/arch/m68k/plexus/config.c
++ *
++ *  Copyright (C) 2024 Paul Brook
++ *
++ * This file is subject to the terms and conditions of the GNU General Public
++ * License.  See the file COPYING in the main directory of this archive
++ * for more details.
++ */
++
++#include <linux/types.h>
++#include <linux/kernel.h>
++#include <linux/mm.h>
++#include <linux/seq_file.h>
++#include <linux/tty.h>
++#include <linux/console.h>
++#include <linux/init.h>
++#include <linux/memblock.h>
++#include <linux/platform_device.h>
++
++#include <asm/oplib.h>
++#include <asm/setup.h>
++#include <asm/contregs.h>
++#include <asm/movs.h>
++#include <asm/pgalloc.h>
++#include <asm/machdep.h>
++#include <asm/machines.h>
++#include <asm/idprom.h>
++#include <asm/irq.h>
++#include <asm/sections.h>
++#include <asm/plexus.h>
++
++unsigned long plexus_boot_pageno;
++unsigned long plexus_boot_memsize;
++
++static void __init plexus_sched_init(void);
++
++static void plexus_get_hardware_list(struct seq_file *m)
++{
++	//seq_printf(m, "PROM Revision:\t%s\n", romvec->pv_monid);
++}
++
++static void plexus_get_model(char *model)
++{
++    strcpy(model, "Plexus P/20");
++}
++
++void __init plexus_init(void)
++{
++	m68k_machtype= MACH_PLEXUS;
++	m68k_cputype = CPU_68010;
++	m68k_fputype = FPU_NONE;
++	m68k_mmutype = MMU_PLEXUS;
++
++	set_fc(USER_DATA);
++}
++
++/* Without this, Bad Things happen when something calls arch_reset. */
++static void plexus_reboot (void)
++{
++	// FIXME: Reset the DMA cpu?
++	while(1){}
++}
++
++static void plexus_halt (void)
++{
++	while(1){}
++}
++
++/* plexus bootmem allocation */
++
++extern void fixup_kernel_mappings(unsigned long mem_pfn);
++
++static void __init plexus_bootmem_alloc(unsigned long memory_start,
++				      unsigned long memory_end)
++{
++	min_low_pfn = __pa(memory_start) >> PAGE_SHIFT;
++	max_pfn = max_low_pfn = __pa(memory_end) >> PAGE_SHIFT;
++	high_memory = (void *)memory_end;
++
++        fixup_kernel_mappings(min_low_pfn);
++        memblock_add_node(0, memory_end, 0, MEMBLOCK_NONE);
++
++        // avoid unmapping the intial kernel image?
++        memblock_reserve(0, memory_start);
++
++	m68k_setup_node(0);
++}
++
++
++void __init config_plexus(void)
++{
++	unsigned long memory_start, memory_end;
++
++	pr_info("ARCH: PLEXUS\n");
++
++	/* Subtract kernel memory from available memory */
++
++        mach_sched_init      =  plexus_sched_init;
++        mach_init_IRQ        =  plexus_init_IRQ;
++        mach_reset           =  plexus_reboot;
++	mach_get_model	     =  plexus_get_model;
++	//mach_hwclk           =  plexus_hwclk;
++	mach_halt	     =  plexus_halt;
++	mach_get_hardware_list = plexus_get_hardware_list;
++
++	memory_start = ((((unsigned long)_end) + PAGE_SIZE - 1) & PAGE_MASK);
++	memory_end = plexus_boot_memsize * 256 * 1024;
++
++	m68k_num_memory=1;
++        m68k_memory[0].size=memory_end;
++
++	plexus_bootmem_alloc(memory_start, memory_end);
++}
++
++static void __init plexus_sched_init(void)
++{
++        unsigned long flags;
++
++        local_irq_save(flags);
++        __raw_writew(__raw_readw(plexus_misc_reg) | PLEXUS_MISC_CINTJ_EN, plexus_misc_reg);
++        local_irq_restore(flags);
++}
++
++int __init plexus_platform_init(void)
++{
++        platform_device_register_simple("p20-serial", -1, NULL, 0);
++        platform_device_register_simple("p20-disk", -1, NULL, 0);
++	return 0;
++}
++
++arch_initcall(plexus_platform_init);
+diff --git a/arch/m68k/plexus/plexusints.c b/arch/m68k/plexus/plexusints.c
+new file mode 100644
+index 000000000000..fe6dd94875c7
+--- /dev/null
++++ b/arch/m68k/plexus/plexusints.c
+@@ -0,0 +1,105 @@
++ /*
++ * linux/arch/m68k/plexus/plexus3ints.c -- Plexus Linux interrupt handling code
++ *
++ * This file is subject to the terms and conditions of the GNU General Public
++ * License.  See the file COPYING in the main directory of this archive
++ * for more details.
++ */
++
++#include <linux/types.h>
++#include <linux/kernel.h>
++#include <linux/sched.h>
++#include <linux/kernel_stat.h>
++#include <linux/interrupt.h>
++#include <linux/completion.h>
++#include <asm/oplib.h>
++#include <asm/irq_regs.h>
++#include <linux/seq_file.h>
++#include <asm/traps.h>
++#include <asm/plexus.h>
++#include <asm/p20-remote.h>
++
++void (*p20_job_serial_handler[MAXUNITS])(void *);
++void *p20_job_serial_args[MAXUNITS];
++
++struct UCOM *UCOM = (struct UCOM *)UCOMADDR;
++struct RCOM *RCOM = (struct RCOM *)RCOMADDR;
++struct SCOM *SCOM = (struct SCOM *)SCOMADDR;
++struct CDB *CDB = (struct CDB *)CDBADDR;
++struct r_tty *remtty = (struct r_tty *)REMTTYADDR;
++
++struct completion p20_scsi_cmd_done[8];
++int p20_scsi_cmd_result;
++
++DEFINE_MUTEX(p20_rcmd_mutex);
++
++void p20_rcmd(unsigned short op, unsigned short device)
++{
++        mutex_lock(&p20_rcmd_mutex);
++        while ((__raw_readw(plexus_kill_reg) & 4) != 0) {
++            yield();
++        }
++        __raw_writew(op, &RCOM->op);
++        __raw_writew(device, &RCOM->device);
++        __raw_writel(0, plexus_dma_int_reg);
++        mutex_unlock(&p20_rcmd_mutex);
++}
++
++static irqreturn_t plexus_clock_int(int irq, void *dev_id)
++{
++	unsigned long flags;
++	unsigned int cnt;
++
++	local_irq_save(flags);
++        __raw_writew(0, plexus_clock_ack_reg);
++	legacy_timer_tick(1);
++	cnt = kstat_irqs_cpu(irq, 0);
++	local_irq_restore(flags);
++	return IRQ_HANDLED;
++}
++
++static irqreturn_t plexus_job_int(int irq, void *dev_id)
++{
++    unsigned int device;
++
++    device = UCOM->device;
++    switch (UCOM->op) {
++    case INPUT:
++        if (device > MAXUNITS) {
++            pr_err("Bad device %d\n", device);
++        } else if (p20_job_serial_handler[device]) {
++            p20_job_serial_handler[device](p20_job_serial_args[device]);
++        } else {
++            pr_err("Unhandled device %d\n", device);
++        }
++        break;
++    case SCSTAT:
++        *(int *)UCOM->src = UCOM->status;
++        fallthrough;
++    case SCNODEV:
++        BUG_ON(device >= 8 || device < 0);
++        complete(&p20_scsi_cmd_done[device]);
++        break;
++    default:
++        pr_err("Unhandled op %d device %d\n", UCOM->op, device);
++        break;
++    }
++    __raw_writew(0, plexus_job_ack_reg);
++    return IRQ_HANDLED;
++}
++
++void __init plexus_init_IRQ(void)
++{
++        int i;
++
++        for (i = 0; i < 8; i++) {
++            init_completion(&p20_scsi_cmd_done[i]);
++        }
++	m68k_setup_user_interrupt(VEC_USER, 192);
++
++	if (request_irq(0x83 - VEC_USER + IRQ_USER, plexus_clock_int, 0, "clock", NULL))
++		pr_err("Couldn't register %s interrupt\n", "clock");
++
++	if (request_irq(DJINTVECTOR - VEC_USER + IRQ_USER, plexus_job_int, 0, "job", NULL))
++		pr_err("Couldn't register %s interrupt\n", "clock");
++}
+diff --git a/arch/m68k/plexus/plexusmmu.c b/arch/m68k/plexus/plexusmmu.c
+new file mode 100644
+index 000000000000..22ee045a7671
+--- /dev/null
++++ b/arch/m68k/plexus/plexusmmu.c
+@@ -0,0 +1,240 @@
++/*
++ * linux/arch/m68k/plexus/plexusmmu.c -- Plexus Linux MMU (mapper) handling
++ *
++ *  Copyright (C) 2024 Paul Brook
++ *
++ * PTE entries are populated in the hardware mapper on demand.
++ * These are tagged with a per-mm mapid that we also allocate lazily.
++ * We don't try and reuse mapids, instead we flush everything and start from
++ * scratch when we run out.
++ * A partial flush is probably as expensive as a full mapper
++ * clear, so there seems little benefit to trying to do anything smarter.
++ *
++ * This file is subject to the terms and conditions of the GNU General Public
++ * License.  See the file COPYING in the main directory of this archive
++ * for more details.
++ */
++
++#include <linux/types.h>
++#include <linux/mm.h>
++#include <linux/memblock.h>
++
++#include <asm/machdep.h>
++#include <asm/mmu_context.h>
++#include <asm/page.h>
++#include <asm/io.h>
++#include <asm/plexus.h>
++
++#define MAX_MAPID 256
++
++const char bad_pmd_string[] = "Bad pmd in pte_alloc: %08lx\n";
++
++pgd_t swapper_pg_dir[PTRS_PER_PGD];
++
++static mm_context_t *mapper_context[MAX_MAPID];
++static int next_mapid = 0;
++
++void plexus_allocate_mapid(struct mm_struct *mm)
++{
++    BUG_ON(mm->context.mapid != -1);
++
++    if (next_mapid == MAX_MAPID) {
++        int i;
++        pr_debug("mapper context flush\n");
++        /* Invalidate all the old contexts */
++        for (i = 0; i < MAX_MAPID; i++) {
++            plexus_release_mapid(i);
++        }
++        /* Reset the mapper ram */
++        for (i = 0; i < PTRS_PER_PTE; i++) {
++            __raw_writel(PLEXUS_PAGE_NONE, &plexus_mapper_ram[i]);
++        }
++        next_mapid = 0;
++    }
++    pr_debug("plexus_allocate_mapid %02x %p\n", next_mapid, mm);
++    mm->context.mapid = next_mapid;
++    mapper_context[next_mapid] = &mm->context;
++    next_mapid = next_mapid + 1;;
++}
++
++void plexus_release_mapid(int mapid)
++{
++    mm_context_t *ctx = mapper_context[mapid];
++    if (!ctx) {
++        return;
++    }
++    pr_debug("plexus_release_mapid %02x\n", mapid);
++    BUG_ON(ctx->mapid != mapid);
++    ctx->mapid = -1;
++    mapper_context[mapid] = NULL;
++}
++
++int plexus_tlb_miss(unsigned long addr, int write)
++{
++    pgd_t *pgd;
++    p4d_t *p4d;
++    pud_t *pud;
++    pmd_t *pmd;
++    pte_t *pte = NULL;
++    unsigned long new_pte;
++    unsigned long __iomem *map_pte;
++    int ret = -1;
++    unsigned long flags;
++
++    local_irq_save(flags);
++
++    if (addr >= TASK_SIZE)
++        goto out;
++
++    pgd = pgd_offset(current->mm, addr);
++    if (pgd_none(*pgd))
++            goto out;
++
++    p4d = p4d_offset(pgd, addr);
++    if (p4d_none(*p4d))
++            goto out;
++
++    pud = pud_offset(p4d, addr);
++    if (pud_none(*pud))
++            goto out;
++
++    pmd = pmd_offset(pud, addr);
++    if (pmd_none(*pmd))
++            goto out;
++
++    pte = pte_offset_map(pmd, addr);
++    if (!pte || pte_none(*pte) || !pte_present(*pte))
++            goto out;
++
++    if (write) {
++            if (!pte_write(*pte))
++                    goto out;
++            set_pte(pte, pte_mkdirty(*pte));
++    }
++
++    set_pte(pte, pte_mkyoung(*pte));
++
++    new_pte = pte_val(*pte);
++    /* Ugly hack: The 68040 MMU doesn't have a separate execute permission,
++     * and our signal return implementation relies on this. */
++    if ((new_pte & PLEXUS_PAGE_NORD) == 0)
++        new_pte &= ~PLEXUS_PAGE_NOEX;
++    if (!pte_dirty(*pte))
++            new_pte |= PLEXUS_PAGE_NOWR;
++
++    new_pte |= (unsigned int)current->mm->context.mapid << 24;
++    map_pte = &plexus_mapper_ram[addr >> PAGE_SHIFT];
++    if (__raw_readl(map_pte) != new_pte) {
++        __raw_writel(new_pte, map_pte);
++        ret = 0;
++    }
++out:
++    local_irq_restore(flags);
++    return ret;
++}
++
++static void fixup_page(unsigned int src_pfn, unsigned int dest_pfn, unsigned long mem_pfn)
++{
++    unsigned int src_addr = src_pfn << PAGE_SHIFT;
++    unsigned int dest_addr = mem_pfn << PAGE_SHIFT;
++    plexus_mapper_sys_ram[mem_pfn] = dest_pfn;
++    /* We might be moving the stack, so this needs to happen without touching memory */
++    asm volatile(
++            "move #0x3ff, %%d0\n\t"
++            "1:move.l %0@+,%1@+\n\t"
++            "dbf %%d0,1b\n\t"
++            "move.l %2,%3@\n\t"
++            : "+a"(src_addr), "+a"(dest_addr)
++            : "d"(dest_pfn), "a"(&plexus_mapper_sys_ram[src_pfn])
++            : "d0", "memory", "cc");
++}
++
++extern unsigned long plexus_boot_pageno;
++
++void __init fixup_kernel_mappings(unsigned long mem_pfn)
++{
++    pte_t *pte = (pte_t *)plexus_mapper_sys_ram;
++    unsigned long this_pfn, next_pfn;
++    unsigned long flags;
++
++    pr_info("rearranging kernel memory (%ld pages)\n", mem_pfn);
++    local_irq_save(flags);
++    for (this_pfn = 0; this_pfn < mem_pfn; this_pfn++) {
++        /* Find the next out of place page */
++        next_pfn = pte_pfn(pte[this_pfn]);
++        if (next_pfn == this_pfn) {
++            pr_debug("page ok at 0x%lx\n", this_pfn);
++            continue;
++        }
++
++        pr_debug("starting page loop 0x%lx\n", this_pfn);
++        /* Move the contents of this page out of the way */
++        fixup_page(this_pfn, mem_pfn, mem_pfn);
++
++        do {
++            /* Move the page that belongs here into place */
++            this_pfn = next_pfn;
++            next_pfn = pte_pfn(pte[this_pfn]);
++            pr_debug("moving page 0x%lx\n", this_pfn);
++            fixup_page(this_pfn, this_pfn, mem_pfn);
++            /* Until we end up back where we started */
++        } while (next_pfn != mem_pfn);
++    }
++    local_irq_restore(flags);
++    pr_debug("done\n");
++}
++
++void __init paging_init(void)
++{
++	unsigned long max_zone_pfn[MAX_NR_ZONES] = { 0 };
++        unsigned long pfn;
++        pte_t *pte;
++
++        BUG_ON(PTRS_PER_PGD > 1);
++        BUG_ON(PTRS_PER_PTE != TASK_SIZE >> PAGE_SHIFT);
++        pgd_val(swapper_pg_dir[0]) = (unsigned long)plexus_mapper_sys_ram;
++        pte = (pte_t *)plexus_mapper_sys_ram;
++
++        /* Populate to the end of the direct ram mapping */
++        for (pfn = PFN_UP(__pa(_end)); pfn < max_pfn; pfn++) {
++            pte[pfn] = pfn_pte(pfn, PAGE_KERNEL);
++        }
++        /* And clear the rest of the address space */
++        for (; pfn < PTRS_PER_PTE; pfn++) {
++            pte_val(pte[pfn]) = PLEXUS_PAGE_NONE;
++        }
++
++        /* Also clear the userspace mapper */
++        for (pte = (pte_t *)plexus_mapper_ram; pte != (pte_t *)plexus_mapper_ram + PTRS_PER_PTE; pte++) {
++            pte_val(*pte) = PLEXUS_PAGE_NONE;
++
++        }
++	empty_zero_page = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
++	if (!empty_zero_page)
++		panic("%s: Failed to allocate %lu bytes align=0x%lx\n",
++		      __func__, PAGE_SIZE, PAGE_SIZE);
++
++	current->mm = NULL;
++	max_zone_pfn[ZONE_DMA] = max_pfn;
++	free_area_init(max_zone_pfn);
++}
++
++static const pgprot_t protection_map[16] = {
++	[VM_NONE]					= __pgprot(PLEXUS_PAGE_NONE),
++	[VM_READ]					= __pgprot(PLEXUS_PAGE_NOWR | PLEXUS_PAGE_NOEX),
++	[VM_WRITE]					= __pgprot(PLEXUS_PAGE_NORD | PLEXUS_PAGE_NOEX),
++	[VM_WRITE | VM_READ]				= __pgprot(PLEXUS_PAGE_NOEX),
++	[VM_EXEC]					= __pgprot(PLEXUS_PAGE_NORD | PLEXUS_PAGE_NOWR),
++	[VM_EXEC | VM_READ]				= __pgprot(PLEXUS_PAGE_NOWR),
++	[VM_EXEC | VM_WRITE]				= __pgprot(PLEXUS_PAGE_NORD),
++	[VM_EXEC | VM_WRITE | VM_READ]			= __pgprot(0),
++	[VM_SHARED]					= __pgprot(PLEXUS_PAGE_NONE),
++	[VM_SHARED | VM_READ]				= __pgprot(PLEXUS_PAGE_NOWR | PLEXUS_PAGE_NOEX),
++	[VM_SHARED | VM_WRITE]				= __pgprot(PLEXUS_PAGE_NORD | PLEXUS_PAGE_NOEX),
++	[VM_SHARED | VM_WRITE | VM_READ]		= __pgprot(PLEXUS_PAGE_NOEX),
++	[VM_SHARED | VM_EXEC]				= __pgprot(PLEXUS_PAGE_NORD | PLEXUS_PAGE_NOWR),
++	[VM_SHARED | VM_EXEC | VM_READ]			= __pgprot(PLEXUS_PAGE_NOWR),
++	[VM_SHARED | VM_EXEC | VM_WRITE]		= __pgprot(PLEXUS_PAGE_NORD),
++	[VM_SHARED | VM_EXEC | VM_WRITE | VM_READ]	= __pgprot(0),
++};
++DECLARE_VM_GET_PAGE_PROT
+diff --git a/drivers/block/Kconfig b/drivers/block/Kconfig
+index 5b9d4aaebb81..42edda7d1784 100644
+--- a/drivers/block/Kconfig
++++ b/drivers/block/Kconfig
+@@ -404,4 +404,12 @@ config BLKDEV_UBLK_LEGACY_OPCODES
+ 
+ source "drivers/block/rnbd/Kconfig"
+ 
++config P20_DISK
++	tristate "Plexus P/20 disk driver"
++	depends on PLEXUS
++	help
++	  P/20 SCSI disk driver
++
++	  Simple disk only block device driver, not a full SCSI host driver
++
+ endif # BLK_DEV
+diff --git a/drivers/block/Makefile b/drivers/block/Makefile
+index 101612cba303..6565861136d7 100644
+--- a/drivers/block/Makefile
++++ b/drivers/block/Makefile
+@@ -39,4 +39,6 @@ obj-$(CONFIG_BLK_DEV_NULL_BLK)	+= null_blk/
+ 
+ obj-$(CONFIG_BLK_DEV_UBLK)			+= ublk_drv.o
+ 
++obj-$(CONFIG_P20_DISK)		+= p20-disk.o
++
+ swim_mod-y	:= swim.o swim_asm.o
+diff --git a/drivers/block/p20-disk.c b/drivers/block/p20-disk.c
+new file mode 100644
+index 000000000000..fd3cff0ca2f3
+--- /dev/null
++++ b/drivers/block/p20-disk.c
+@@ -0,0 +1,332 @@
++/*
++ * Plexus P/20 disk driver
++ *
++ * In theory this should be a SCSI HBA.
++ * However firmware limitations mean exposing that is more trouble than it's
++ * worth, so we just expose a "simple" block driver
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/init.h>
++
++#include <linux/sched.h>
++#include <linux/kernel.h>	/* printk() */
++#include <linux/slab.h>		/* kmalloc() */
++#include <linux/fs.h>		/* everything... */
++#include <linux/errno.h>	/* error codes */
++#include <linux/timer.h>
++#include <linux/types.h>	/* size_t */
++#include <linux/fcntl.h>	/* O_ACCMODE */
++#include <linux/hdreg.h>	/* HDIO_GETGEO */
++#include <linux/kdev_t.h>
++#include <linux/vmalloc.h>
++#include <linux/blkdev.h>
++#include <linux/buffer_head.h>	/* invalidate_bdev */
++#include <linux/bio.h>
++#include <linux/blk-mq.h>
++#include <linux/platform_device.h>
++
++#include <asm/plexus.h>
++#include <asm/p20-remote.h>
++
++MODULE_LICENSE("GPL");
++
++#define P20_DISK_MINORS 16
++
++static int p20d_major = 0;
++module_param(p20d_major, int, 0);
++
++/*
++ * The different "request modes" we can use.
++ */
++enum {
++	RM_SIMPLE  = 0,	/* The extra-simple request function */
++	RM_FULL    = 1,	/* The full-blown version */
++	RM_NOQUEUE = 2,	/* Use make_request */
++};
++static int request_mode = RM_SIMPLE;
++module_param(request_mode, int, 0);
++
++/*
++ * Minor number and partition management.
++ */
++#define SBULL_MINORS	16
++#define MINOR_SHIFT	4
++#define DEVNUM(kdevnum)	(MINOR(kdev_t_to_nr(kdevnum)) >> MINOR_SHIFT
++
++/*
++ * The internal representation of our device.
++ */
++struct p20d_dev {
++    int id;
++    int blocks;
++    struct gendisk *gd;
++    struct blk_mq_tag_set tag_set;
++    struct mutex lock;
++    int refcount;
++};
++
++/* Scsi Write Address MaP
++ * Map a page into the BLK memory region
++ */
++void swamp(unsigned int pfn, int block_offset)
++{
++    block_offset += SCSI_BLK_ADDR_START;
++    plexus_mapper_sys_ram[block_offset >> PAGE_SHIFT] = pfn | PLEXUS_PAGE_NOEX;
++}
++
++static blk_status_t p20d_queue_rq(struct blk_mq_hw_ctx *hctx,
++				     const struct blk_mq_queue_data *bd)
++{
++	struct request *rq = bd->rq;
++	struct p20d_dev *dev = rq->q->disk->private_data;
++        struct bio_vec bv;
++        struct req_iterator iter;
++	blk_status_t err;
++        unsigned long base_offset, end_offset;
++        unsigned long prev_pfn;
++        struct cdb *cmd;
++        int pos;
++        int status;
++
++        mutex_lock(&dev->lock);
++
++	blk_mq_start_request(rq);
++        pos = blk_rq_pos(rq);
++        // We only implement READ(6)/WRITE(6)
++        BUG_ON(pos > 0x1fffff);
++
++        base_offset = 0;
++        end_offset = 0;
++        prev_pfn = ~0;
++        pr_debug("sectors %d, segments: %d\n", (int)blk_rq_sectors(rq), (int)rq->nr_phys_segments);
++        rq_for_each_segment(bv, rq, iter) {
++            unsigned long pfn = page_to_pfn(bv.bv_page);
++            pr_debug("offset:%d len:%d pfn:%06lx\n", (int)bv.bv_offset , (int)bv.bv_len, pfn);
++            BUG_ON(bv.bv_offset + bv.bv_len > PAGE_SIZE);
++            if (pfn == prev_pfn) {
++                BUG_ON(bv.bv_offset != (end_offset & (PAGE_SIZE - 1)));
++            } else {
++                BUG_ON(bv.bv_offset != 0 && end_offset != 0);
++                BUG_ON(end_offset & (PAGE_SIZE - 1));
++                base_offset += bv.bv_offset;
++                end_offset += bv.bv_offset;
++                // FIXME: This will break with multiple disks
++                swamp(pfn, end_offset);
++            }
++            end_offset += bv.bv_len;
++            prev_pfn = pfn;
++        }
++
++        cmd = &CDB[dev->id].cdb;
++        if (rq_data_dir(rq) == READ) {
++            cmd->op = SCSIREAD;
++        } else {
++            cmd->op = SCSIWRITE;
++        }
++        cmd->lun = 0;
++        cmd->lad2 = (pos >> 16) & 0x1f;
++        cmd->lad1 = (pos >> 8) & 0xff;
++        cmd->lad0 = pos & 0xff;
++        cmd->byte4 = blk_rq_sectors(rq);
++        cmd->byte5 = 0;
++        
++        SCOM->cdblen = 6;
++        SCOM->device = dev->id;
++        SCOM->addr = SCSI_BLK_ADDR_START + base_offset;
++        SCOM->count = end_offset - base_offset;
++        SCOM->bp = &status;
++
++        status = -1;
++        p20_rcmd(SCSICOM, dev->id);
++        wait_for_completion(&p20_scsi_cmd_done[dev->id]);
++
++        if (status == 0) {
++            err = BLK_STS_OK;
++        } else {
++            // FIXME: Need to do REQUEST SENSE
++            pr_err("Command failed???\n");
++            err = BLK_STS_IOERR;
++        }
++        blk_mq_end_request(rq, err);
++        mutex_unlock(&dev->lock);
++	return BLK_STS_OK;
++}
++
++static int p20d_getgeo(struct block_device *bdev, struct hd_geometry *geo)
++{
++	struct p20d_dev *dev = bdev->bd_disk->private_data;
++
++        /* Make something up. */
++	geo->heads = 4;
++	geo->sectors = 16;
++	geo->cylinders = dev->blocks >> 6;
++	return 0;
++}
++
++/*
++ * Open and close.
++ */
++
++static int p20d_open(struct gendisk *disk, fmode_t mode)
++{
++	struct p20d_dev *dev = disk->private_data;
++
++        mutex_lock(&dev->lock);
++        dev->refcount++;
++	mutex_unlock(&dev->lock);
++	return 0;
++}
++
++static void p20d_release(struct gendisk *disk)
++{
++	struct p20d_dev *dev = disk->private_data;
++
++        mutex_lock(&dev->lock);
++        dev->refcount--;
++	mutex_unlock(&dev->lock);
++}
++
++/*
++ * The device operations structure.
++ */
++static struct block_device_operations p20d_fops = {
++	.owner           = THIS_MODULE,
++	.open 	         = p20d_open,
++	.release 	 = p20d_release,
++        .getgeo          = p20d_getgeo,
++};
++
++static const struct blk_mq_ops p20d_mq_ops = {
++	.queue_rq = p20d_queue_rq,
++};
++
++static int p20d_alloc_drive(int id, int size)
++{
++        struct p20d_dev *dev;
++        struct gendisk *disk;
++        int err = 0;
++       
++        dev = kzalloc(GFP_KERNEL, sizeof(*dev));
++        if (!dev) {
++            return -ENOMEM;
++        }
++
++        mutex_init(&dev->lock);
++
++        dev->blocks = size;
++        dev->id = id;
++
++	dev->tag_set.ops = &p20d_mq_ops;
++	dev->tag_set.nr_hw_queues = 1;
++	dev->tag_set.nr_maps = 1;
++	dev->tag_set.queue_depth = 2;
++	dev->tag_set.numa_node = NUMA_NO_NODE;
++	dev->tag_set.flags = BLK_MQ_F_SHOULD_MERGE;
++	if (blk_mq_alloc_tag_set(&dev->tag_set)) {
++            err = -ENOMEM;
++		goto out;
++        }
++
++	disk = blk_mq_alloc_disk(&dev->tag_set, NULL);
++	if (IS_ERR(disk)) {
++		err = PTR_ERR(disk);
++                goto out_cleanup_tagset;
++        }
++
++	disk->major = p20d_major;
++	disk->first_minor = id * P20_DISK_MINORS;
++	disk->minors = P20_DISK_MINORS;
++	disk->fops = &p20d_fops;
++        disk->private_data = disk;
++        sprintf(disk->disk_name, "pd%c", id + 'a');
++	disk->private_data = dev;
++	set_capacity(disk, size);
++        blk_queue_max_hw_sectors(disk->queue, 255);
++        // ??? This seems to be ignored, so instead limit to a single segment
++        // blk_queue_dma_alignment(disk->queue, PAGE_SIZE - 1);
++        blk_queue_max_segments(disk->queue, 1);
++
++        dev->gd = disk;
++	err = add_disk(disk);
++	if (err) {
++            put_disk(disk);
++            goto out_cleanup_tagset;
++        }
++
++	return 0;
++
++out_cleanup_tagset:
++	blk_mq_free_tag_set(&dev->tag_set);
++out:
++        kfree(dev);
++	return err;
++}
++
++struct capacity_response {
++    u32 block_count;
++    u32 block_len;
++};
++
++int p20d_disk_probe(int id)
++{
++    u8 *p = (u8 *)&CDB[id].cdb;
++    struct capacity_response *resp;
++    int status;
++
++    resp = kmalloc(GFP_KERNEL, sizeof(*resp));
++    swamp(virt_to_pfn(resp), 0);
++
++    /* The rom only allocates 6 bytes for each CDB.  We want to send a 10 byte
++     * command.  As long as we idon't overlap commands for different devices,
++     * and never do this for the last ID, this is probably fine? */
++    memset(p, 0, 10);
++    p[0] = 0x25; /* READ CAPACITY */
++
++    SCOM->cdblen = 10;
++    SCOM->device = id;
++    SCOM->addr = SCSI_BLK_ADDR_START + ((unsigned long)resp & ~PAGE_MASK);
++    SCOM->count = 8;
++    SCOM->bp = (int *)&status;
++
++    status = -1;
++    p20_rcmd(SCSIRCOM, id);
++    wait_for_completion(&p20_scsi_cmd_done[id]);
++    if (status != 0) {
++        pr_err("failed to read capacity from device %d (status %d)\n", id, status);
++        kfree(resp);
++        return -ENODEV;
++    }
++    pr_info("device %d capacity %d sector size %d\n", id, (int)resp->block_count, (int)resp->block_len);
++    BUG_ON(resp->block_len != 512);
++    return p20d_alloc_drive(id, resp->block_count);
++}
++
++static int __init p20d_probe(struct platform_device *pdev)
++{
++	/*
++	 * Get registered.
++	 */
++	p20d_major = register_blkdev(p20d_major, "pd");
++	if (p20d_major <= 0) {
++                pr_err("unable to get major number\n");
++		return -EBUSY;
++	}
++
++        // FIXME: Multple devices
++        p20d_disk_probe(0);
++    
++	return 0;
++}
++
++static struct platform_driver p20d_driver = {
++	.driver   = {
++		.name	= "p20-disk",
++	},
++};
++
++module_platform_driver_probe(p20d_driver, p20d_probe);
++
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("platform:p20-serial");
+diff --git a/drivers/tty/Kconfig b/drivers/tty/Kconfig
+index 5646dc6242cd..5319ab0be161 100644
+--- a/drivers/tty/Kconfig
++++ b/drivers/tty/Kconfig
+@@ -292,6 +292,12 @@ config PPC_EARLY_DEBUG_EHV_BC_HANDLE
+ 	  there simply will be no early console output.  This is true also
+ 	  if you don't boot under a hypervisor at all.
+ 
++config P20_SERIAL
++	tristate "Plexus P/20 serial port driver"
++	depends on PLEXUS
++	help
++	  Serial port driver for Plexus P/20 mainbord serial ports
++
+ config GOLDFISH_TTY
+ 	tristate "Goldfish TTY Driver"
+ 	depends on GOLDFISH
+diff --git a/drivers/tty/Makefile b/drivers/tty/Makefile
+index 07aca5184a55..cc8369d05fbf 100644
+--- a/drivers/tty/Makefile
++++ b/drivers/tty/Makefile
+@@ -27,5 +27,6 @@ obj-$(CONFIG_GOLDFISH_TTY)	+= goldfish.o
+ obj-$(CONFIG_MIPS_EJTAG_FDC_TTY) += mips_ejtag_fdc.o
+ obj-$(CONFIG_VCC)		+= vcc.o
+ obj-$(CONFIG_RPMSG_TTY)		+= rpmsg_tty.o
++obj-$(CONFIG_P20_SERIAL)	+= p20-serial.o
+ 
+ obj-y += ipwireless/
+diff --git a/drivers/tty/p20-serial.c b/drivers/tty/p20-serial.c
+new file mode 100644
+index 000000000000..916777678b59
+--- /dev/null
++++ b/drivers/tty/p20-serial.c
+@@ -0,0 +1,425 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ *          p20-ser.c  -- Plexus P/20 serial ports
++ *
++ *      Copyright (C) 2024 Paul Brook <paul@nowt.org>
++ */
++
++#include <linux/module.h>
++#include <linux/errno.h>
++#include <linux/signal.h>
++#include <linux/sched.h>
++#include <linux/timer.h>
++#include <linux/interrupt.h>
++#include <linux/tty.h>
++#include <linux/tty_flip.h>
++#include <linux/serial.h>
++#include <linux/serial_reg.h>
++#include <linux/major.h>
++#include <linux/string.h>
++#include <linux/fcntl.h>
++#include <linux/ptrace.h>
++#include <linux/ioport.h>
++#include <linux/mm.h>
++#include <linux/delay.h>
++#include <linux/pci.h>
++#include <linux/bitops.h>
++#include <linux/slab.h>
++#include <linux/ratelimit.h>
++#include <linux/platform_device.h>
++#include <linux/console.h>
++
++#include <asm/io.h>
++#include <asm/irq.h>
++#include <linux/uaccess.h>
++#include <asm/plexus.h>
++#include <asm/p20-remote.h>
++
++/* Limit to avoid the ambiguity of a completely full
++ * curcular buffer */
++#define P20_OBUF_MAX 0x3fe
++
++/* Variables for insmod */
++
++MODULE_AUTHOR("Paul Brook");
++MODULE_DESCRIPTION("Plexus P/20 serial driver");
++MODULE_LICENSE("GPL");
++
++struct p20_port {
++	struct tty_port port;
++        int devid;
++};
++
++#define P20_NUM_PORTS 8
++
++struct p20_serial_state {
++	struct p20_port ports[P20_NUM_PORTS];
++};
++
++static struct p20_serial_state p20_serial_state;
++
++static struct tty_driver *p20_tty_driver;
++
++static int p20_activate(struct tty_port *tport, struct tty_struct *tty)
++{
++	struct p20_port *port = container_of(tport, struct p20_port, port);
++
++        p20_rcmd(TTYOPEN, port->devid);
++        // FIXME: Race condition if we send before this is precessed?
++        return 0;
++}
++
++/*
++ * This routine will shutdown a serial port
++ */
++static void p20_shutdown_port(struct tty_port *tport)
++{
++	struct p20_port *port = container_of(tport, struct p20_port, port);
++
++        p20_rcmd(TTYCLOSE, port->devid);
++        // FIXME: Race condition where job interrupt may already be pending?
++}
++
++/*
++ * This routine is called whenever a serial port is opened.
++ */
++static int p20_open(struct tty_struct *tty, struct file *filp)
++{
++	struct tty_port *tport = tty->port;
++	struct p20_port *port = container_of(tport, struct p20_port, port);
++
++	tty->driver_data = port;
++
++	return tty_port_open(tport, tty, filp);
++}
++
++static void p20_flush_buffer(struct tty_struct *tty)
++{
++	struct tty_port *tport = tty->port;
++	struct p20_port *port = container_of(tport, struct p20_port, port);
++        p20_rcmd(TTYWFLUSH, port->devid);
++}
++
++static void p20_close(struct tty_struct *tty, struct file *filp)
++{
++	tty_port_close(tty->port, tty, filp);
++}
++
++static int p20_obuf_used(int devid)
++{
++        struct r_tty *rtty = &remtty[devid];
++        unsigned short oremote;
++
++        oremote = __raw_readw(&rtty->oremote);
++
++	return (rtty->ojob - oremote) & 0x3ff;
++}
++
++static ssize_t p20_write(struct tty_struct *tty, const u8 *buf, size_t count)
++{
++	struct p20_port *info = tty->driver_data;
++        struct r_tty *rtty = &remtty[info->devid];
++	unsigned long flags;
++        unsigned int avail;
++        unsigned int offset;
++	int written;
++
++	local_irq_save(flags);
++        avail = P20_OBUF_MAX - p20_obuf_used(info->devid);
++        if (avail < count)
++            count = avail;
++        written = count;
++        offset = rtty->ojob;
++        while (count--) {
++            rtty->outbuf[offset] = *(buf++);
++            offset = (offset + 1) & 0x3ff;
++        }
++        rtty->ojob = offset;
++	local_irq_restore(flags);
++
++	return written;
++}
++
++static int p20_put_char(struct tty_struct *tty, u8 ch)
++{
++	struct p20_port *info = tty->driver_data;
++        struct r_tty *rtty = &remtty[info->devid];
++	unsigned long flags;
++	int ret;
++
++	local_irq_save(flags);
++        if (p20_obuf_used(info->devid) < P20_OBUF_MAX) {
++            rtty->outbuf[rtty->ojob] = ch;
++            rtty->ojob = (rtty->ojob + 1) & 0x3ff;
++            ret = 1;
++        } else {
++            ret = 0;
++        }
++	local_irq_restore(flags);
++
++	return ret;
++}
++
++// FIXME: Do these need to disable IRQs?
++static unsigned int p20_chars_in_buffer(struct tty_struct *tty)
++{
++	struct p20_port *info = tty->driver_data;
++
++        return p20_obuf_used(info->devid);
++}
++
++static unsigned int p20_write_room(struct tty_struct *tty)
++{
++	struct p20_port *info = tty->driver_data;
++
++	return P20_OBUF_MAX - p20_obuf_used(info->devid);
++}
++
++/*
++ * This routine is called by the upper-layer tty layer to signal that
++ * incoming characters should be throttled.
++ */
++static void p20_throttle(struct tty_struct *tty)
++{
++        // TODO: Should we poke at the uart interrupt enable register directly?
++}
++
++static void p20_unthrottle(struct tty_struct *tty)
++{
++}
++
++static void p20_set_termios(struct tty_struct *tty,
++			      const struct ktermios *old_termios)
++{
++    //pr_info("iflag %x lflag %x", old_termios->c_iflag, old_termios->c_lflag);
++	//struct p20_port *info = tty->driver_data;
++	//unsigned long flags;
++
++        //FIXME: do temios things
++        // Hopefully the rtty flags line up with modern linux?
++}
++
++/*
++ * This routine is called by tty_hangup() when a hangup is signaled.
++ */
++static void p20_hangup(struct tty_struct *tty)
++{
++	struct p20_port *info = tty->driver_data;
++
++	p20_flush_buffer(tty);
++	tty_port_hangup(&info->port);
++}
++
++#if 0
++static bool mxser_receive_chars_new(struct mxser_port *port, u8 status)
++{
++	enum mxser_must_hwid hwid = port->board->must_hwid;
++	u8 gdl;
++
++	if (hwid == MOXA_OTHER_UART)
++		return false;
++	if (status & (UART_LSR_BRK_ERROR_BITS | MOXA_MUST_LSR_RERR))
++		return false;
++
++	gdl = inb(port->ioaddr + MOXA_MUST_GDL_REGISTER);
++	if (hwid == MOXA_MUST_MU150_HWID)
++		gdl &= MOXA_MUST_GDL_MASK;
++
++	while (gdl--) {
++		u8 ch = inb(port->ioaddr + UART_RX);
++		if (!tty_insert_flip_char(&port->port, ch, 0))
++			port->icount.buf_overrun++;
++	}
++
++	return true;
++}
++
++static u8 mxser_receive_chars(struct tty_struct *tty,
++		struct mxser_port *port, u8 status)
++{
++	!mxser_receive_chars_new(port, status);
++
++	tty_flip_buffer_push(&port->port);
++
++	return status;
++}
++#endif
++
++static void p20_serial_int_handler(void *arg)
++{
++    struct p20_port *info = arg;
++    unsigned int count, len;
++    char *src;
++   
++    count = UCOM->count;
++    src = UCOM->src;
++    while (count > 0) {
++        len = tty_insert_flip_string(&info->port, src, count);
++        if (len == 0) {
++            pr_err("tty overflow");
++            // FIXME: overflow
++        }
++        count -= len;
++        src += len;
++    }
++    tty_flip_buffer_push(&info->port);
++}
++
++static const struct tty_operations p20_serial_ops = {
++	.open = p20_open,
++	.close = p20_close,
++	.write = p20_write,
++	.put_char = p20_put_char,
++	.write_room = p20_write_room,
++	.chars_in_buffer = p20_chars_in_buffer,
++	.flush_buffer = p20_flush_buffer,
++	.throttle = p20_throttle,
++	.unthrottle = p20_unthrottle,
++	.set_termios = p20_set_termios,
++	//.stop = p20_stop,
++	//.start = p20_start,
++	.hangup = p20_hangup,
++	//.break_ctl = p20_rs_break,
++        /* tty_wait_until_sent already checked chars_in_buffer, which is good enough? */
++	//.wait_until_sent = p20_wait_until_sent,
++#if 0
++	.tiocmget = p20_tiocmget,
++	.tiocmset = p20_tiocmset,
++	.get_icount = p20_get_icount,
++	.set_serial = p20_set_serial_info,
++	.get_serial = p20_get_serial_info,
++#endif
++};
++
++static const struct tty_port_operations p20_port_ops = {
++	//.carrier_raised = p20_carrier_raised,
++	//.dtr_rts = p20_dtr_rts,
++	.activate = p20_activate,
++	.shutdown = p20_shutdown_port,
++};
++
++/*
++ * ------------------------------------------------------------
++ * Serial console driver
++ * ------------------------------------------------------------
++ */
++
++static void p20_console_putc(int devid, unsigned char ch)
++{
++        struct r_tty *rtty = &remtty[devid];
++        while (p20_obuf_used(devid) >= P20_OBUF_MAX) {
++            cpu_relax();
++        }
++        rtty->outbuf[rtty->ojob] = ch;
++        rtty->ojob = (rtty->ojob + 1) & 0x3ff;
++}
++
++static void p20_console_write(struct console *co, const char *s,
++				unsigned count)
++{
++        unsigned long flags;
++
++        local_irq_save(flags);
++
++	while (count--) {
++		if (*s == '\n')
++			p20_console_putc(co->index, '\r');
++		p20_console_putc(co->index, *s++);
++	}
++
++        local_irq_restore(flags);
++}
++
++static struct tty_driver *p20_console_device(struct console *c, int *index)
++{
++	*index = 0;
++	return p20_tty_driver;
++}
++
++static struct console p20_sercons = {
++	.name =		"ttyS",
++	.write =	p20_console_write,
++	.device =	p20_console_device,
++	.flags =	CON_PRINTBUFFER,
++	.index =	-1,
++};
++
++static int __init p20_serial_probe(struct platform_device *pdev)
++{
++	struct p20_serial_state *state = &p20_serial_state;
++	struct tty_driver *driver;
++        struct device *tty_dev;
++        struct p20_port *info;
++	int i;
++	int retval;
++
++	driver = tty_alloc_driver(P20_NUM_PORTS, TTY_DRIVER_DYNAMIC_DEV | TTY_DRIVER_REAL_RAW);
++	if (IS_ERR(driver))
++		return PTR_ERR(driver);
++
++	/* Initialize the tty_driver structure */
++
++	driver->driver_name = "p20";
++	driver->name = "ttyS";
++	driver->major = TTY_MAJOR;
++	driver->minor_start = 64;
++	driver->type = TTY_DRIVER_TYPE_SERIAL;
++	driver->subtype = SERIAL_TYPE_NORMAL;
++	driver->init_termios = tty_std_termios;
++	driver->init_termios.c_cflag =
++		B9600 | CS8 | CREAD | HUPCL | CLOCAL;
++	tty_set_operations(driver, &p20_serial_ops);
++	retval = tty_register_driver(driver);
++	if (retval) {
++		pr_err("could not install tty driver !\n");
++		goto err_put;
++	}
++
++	p20_tty_driver = driver;
++
++        for (i = 0; i < P20_NUM_PORTS; i++) {
++            struct r_tty *rtty = &remtty[i];
++            info = &state->ports[i];
++            info->devid = i;
++            tty_port_init(&info->port);
++            info->port.ops = &p20_port_ops;
++            rtty->outbuf = kmalloc(0x400, GFP_KERNEL);
++            rtty->minin = kmalloc(256, GFP_KERNEL);
++            if (!(rtty->outbuf && rtty->minin)) {
++                pr_err("buffer allocation failed");
++            }
++            rtty->maxin = rtty->minin + 256;
++            p20_job_serial_args[i] = info;
++            p20_job_serial_handler[i] = p20_serial_int_handler;
++            tty_dev = tty_port_register_device(&info->port, driver, i, &pdev->dev);
++            if (!tty_dev) {
++                pr_err("could not register tty %d\n", i);
++            }
++        }
++	register_console(&p20_sercons);
++        return 0;
++
++err_put:
++	tty_driver_kref_put(driver);
++	return retval;
++}
++
++static int __exit p20_serial_remove(struct platform_device *pdev)
++{
++    /* TODO: Unregister tty ports and devices */
++	tty_unregister_driver(p20_tty_driver);
++	tty_driver_kref_put(p20_tty_driver);
++	return 0;
++}
++
++static struct platform_driver p20_serial_driver = {
++	.remove = __exit_p(p20_serial_remove),
++	.driver   = {
++		.name	= "p20-serial",
++	},
++};
++
++module_platform_driver_probe(p20_serial_driver, p20_serial_probe);
++
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("platform:p20-serial");
+diff --git a/init/initramfs.c b/init/initramfs.c
+index efc477b905a4..eb3ed179c627 100644
+--- a/init/initramfs.c
++++ b/init/initramfs.c
+@@ -487,6 +487,7 @@ static char * __init unpack_to_rootfs(char *buf, unsigned long len)
+ 	const char *compress_name;
+ 	static __initdata char msg_buf[64];
+ 
++        pr_info("unpacking initramfs %p %ld\n", buf, len);
+ 	header_buf = kmalloc(110, GFP_KERNEL);
+ 	symlink_buf = kmalloc(PATH_MAX + N_ALIGN(PATH_MAX) + 1, GFP_KERNEL);
+ 	name_buf = kmalloc(N_ALIGN(PATH_MAX), GFP_KERNEL);
