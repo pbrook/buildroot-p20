@@ -5,7 +5,7 @@ Intro
 
 This is the buildroot basic board support for the Plexus P/20
 
-This is a m68010 based unix machine. More info at https://github.com/misterblack1/plexus-p20
+The Plexus P/20 is is a m68010 based unix machine. More info at https://github.com/misterblack1/plexus-p20
 
 Limitations
 ===========
@@ -14,7 +14,7 @@ Requires 4MB of DRAM installed. In theory 2MB might be possible, but I
 couldn't make it fit. Support a max of 4MB of DRAM - more requires
 kernel HIGHMEM support, which isn't implemented yet
 
-Not binary-compatible with other m68k-linux systems (these requires a 608202 +
+Not binary-compatible with other m68k-linux systems (these requires a 68020 +
 FPU).  Shared libaries and PIC code not currently suported.
 
 How to build it
@@ -22,7 +22,7 @@ How to build it
 
 To build a basic image:
 
-  $ make lego_ev3_defconfig
+  $ make plexus_p20_defconfig
   $ make
 
 this will output a bootable disk imake in output/images/plexus.img
