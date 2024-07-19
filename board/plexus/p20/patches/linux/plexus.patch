@@ -2566,10 +2566,10 @@ index 07aca5184a55..cc8369d05fbf 100644
  obj-y += ipwireless/
 diff --git a/drivers/tty/p20-serial.c b/drivers/tty/p20-serial.c
 new file mode 100644
-index 000000000000..916777678b59
+index 000000000000..e4d392c8fa62
 --- /dev/null
 +++ b/drivers/tty/p20-serial.c
-@@ -0,0 +1,425 @@
+@@ -0,0 +1,429 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + *          p20-ser.c  -- Plexus P/20 serial ports
@@ -2637,7 +2637,7 @@ index 000000000000..916777678b59
 +	struct p20_port *port = container_of(tport, struct p20_port, port);
 +
 +        p20_rcmd(TTYOPEN, port->devid);
-+        // FIXME: Race condition if we send before this is precessed?
++        // FIXME: Race condition if we send before this is processed?
 +        return 0;
 +}
 +
@@ -2763,12 +2763,16 @@ index 000000000000..916777678b59
 +static void p20_set_termios(struct tty_struct *tty,
 +			      const struct ktermios *old_termios)
 +{
-+    //pr_info("iflag %x lflag %x", old_termios->c_iflag, old_termios->c_lflag);
-+	//struct p20_port *info = tty->driver_data;
-+	//unsigned long flags;
++	struct p20_port *info = tty->driver_data;
++        struct r_tty *rtty = &remtty[info->devid];
 +
-+        //FIXME: do temios things
-+        // Hopefully the rtty flags line up with modern linux?
++        /* The n_tty ldisc handles local echo and cannon buffering so
++         * we can't offload this to DMA, and have to run it it "raw" mode
++         */
++        __raw_writew(0, &rtty->iflag);
++        __raw_writew(0, &rtty->oflag);
++        __raw_writew(0, &rtty->lflag);
++        // TODO: Set baud rate
 +}
 +
 +/*
