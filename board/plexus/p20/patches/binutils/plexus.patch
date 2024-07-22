@@ -11,3 +11,139 @@ index 79b3251ebad..7dd60c0304b 100644
  MAXPAGESIZE="CONSTANT (MAXPAGESIZE)"
  COMMONPAGESIZE="CONSTANT (COMMONPAGESIZE)"
  ARCH=m68k
+diff --git a/bfd/elf32-m68k.c b/bfd/elf32-m68k.c
+index 6355ae92a3c..b552b0b2b81 100644
+--- a/bfd/elf32-m68k.c
++++ b/bfd/elf32-m68k.c
+@@ -477,6 +477,7 @@ struct elf_m68k_plt_info
+   struct {
+     unsigned int got; /* the symbol's .got.plt entry */
+     unsigned int plt; /* .plt */
++    unsigned int shortplt;
+   } symbol_relocs;
+ 
+   /* The offset of the resolver stub from the start of SYMBOL_ENTRY.
+@@ -516,7 +517,7 @@ static const struct elf_m68k_plt_info elf_m68k_plt_info =
+ {
+   PLT_ENTRY_SIZE,
+   elf_m68k_plt0_entry, { 4, 12 },
+-  elf_m68k_plt_entry, { 4, 16 }, 8
++  elf_m68k_plt_entry, { 4, 16, 0 }, 8
+ };
+ 
+ #define ISAB_PLT_ENTRY_SIZE 24
+@@ -551,7 +552,7 @@ static const struct elf_m68k_plt_info elf_isab_plt_info =
+ {
+   ISAB_PLT_ENTRY_SIZE,
+   elf_isab_plt0_entry, { 2, 12 },
+-  elf_isab_plt_entry, { 2, 20 }, 12
++  elf_isab_plt_entry, { 2, 20, 0 }, 12
+ };
+ 
+ #define ISAC_PLT_ENTRY_SIZE 24
+@@ -586,7 +587,7 @@ static const struct elf_m68k_plt_info elf_isac_plt_info =
+ {
+   ISAC_PLT_ENTRY_SIZE,
+   elf_isac_plt0_entry, { 2, 12},
+-  elf_isac_plt_entry, { 2, 20 }, 12
++  elf_isac_plt_entry, { 2, 20, 0 }, 12
+ };
+ 
+ #define CPU32_PLT_ENTRY_SIZE 24
+@@ -618,7 +619,41 @@ static const struct elf_m68k_plt_info elf_cpu32_plt_info =
+ {
+   CPU32_PLT_ENTRY_SIZE,
+   elf_cpu32_plt0_entry, { 4, 12 },
+-  elf_cpu32_plt_entry, { 4, 18 }, 10
++  elf_cpu32_plt_entry, { 4, 18, 0 }, 10
++};
++
++#define M68000_PLT_ENTRY_SIZE 22
++
++static const bfd_byte elf_000_plt0_entry[M68000_PLT_ENTRY_SIZE] =
++{
++  0x20, 0x3c,		  /* move.l #offset,%d0 */
++  0, 0, 0, 0,		  /* + (.got + 4) - . */
++  0x2f, 0x3b, 0x08, 0xfa, /* move.l (-6,%pc,%d0:l),-(%sp) */
++  0x20, 0x3c,		  /* move.l #offset,%d0 */
++  0, 0, 0, 0,		  /* + (.got + 8) - . */
++  0x20, 0x7b, 0x08, 0xfa, /* move.l (-6,%pc,%d0:l), %a0 */
++  0x4e, 0xd0,		  /* jmp (%a0) */
++};
++
++/* Subsequent entries in a procedure linkage table look like this.  */
++
++static const bfd_byte elf_000_plt_entry[M68000_PLT_ENTRY_SIZE] =
++{
++  0x20, 0x3c,		  /* move.l #offset,%d0 */
++  0, 0, 0, 0,		  /* + (.got.plt entry) - . */
++  0x20, 0x7b, 0x08, 0xfa, /* move.l (-6,%pc,%d0:l), %a0 */
++  0x4e, 0xd0,		  /* jmp (%a0) */
++  0x2f, 0x3c,		  /* move.l #offset,-(%sp) */
++  0, 0, 0, 0,		  /* + reloc index */
++  0x60, 0x00,		  /* bra.w .plt */
++  0, 0		          /* + .plt - . */
++};
++
++static const struct elf_m68k_plt_info elf_000_plt_info =
++{
++  M68000_PLT_ENTRY_SIZE,
++  elf_000_plt0_entry, { 2, 12 },
++  elf_000_plt_entry, { 2, 20, 1 }, 12
+ };
+ 
+ /* The m68k linker needs to keep track of the number of relocs that it
+@@ -2920,6 +2955,8 @@ elf_m68k_get_plt_info (bfd *output_bfd)
+   unsigned int features;
+ 
+   features = bfd_m68k_mach_to_features (bfd_get_mach (output_bfd));
++  if (features & m68000)
++    return &elf_000_plt_info;
+   if (features & cpu32)
+     return &elf_cpu32_plt_info;
+   if (features & mcfisa_b)
+@@ -4015,6 +4052,28 @@ elf_m68k_relocate_section (bfd *output_bfd,
+   return true;
+ }
+ 
++/* Install an M_68K_PC16 relocation against VALUE at offset OFFSET
++   into section SEC.  */
++
++static void
++elf_m68k_install_pc16 (asection *sec, bfd_vma offset, bfd_vma value)
++{
++  /* Make VALUE PC-relative.  */
++  value -= sec->output_section->vma + offset;
++
++  /* Apply any in-place addend.  */
++  value += bfd_get_16 (sec->owner, sec->contents + offset);
++
++  if (value != (bfd_vma)(int16_t)value) {
++      _bfd_error_handler
++        /* xgettext:c-format */
++        (_("%pB: PLT too big (%" PRId64 ")"),
++         sec->owner,
++         (uint64_t) value);
++  }
++  bfd_put_16 (sec->owner, value, sec->contents + offset);
++}
++
+ /* Install an M_68K_PC32 relocation against VALUE at offset OFFSET
+    into section SEC.  */
+ 
+@@ -4090,8 +4149,13 @@ elf_m68k_finish_dynamic_symbol (bfd *output_bfd,
+ 		  + h->plt.offset
+ 		  + plt_info->symbol_resolve_entry + 2);
+ 
+-      elf_m68k_install_pc32 (splt, h->plt.offset + plt_info->symbol_relocs.plt,
+-			     splt->output_section->vma);
++      if (plt_info->symbol_relocs.shortplt) {
++          elf_m68k_install_pc16 (splt, h->plt.offset + plt_info->symbol_relocs.plt,
++                                 splt->output_section->vma);
++      } else {
++          elf_m68k_install_pc32 (splt, h->plt.offset + plt_info->symbol_relocs.plt,
++                                 splt->output_section->vma);
++      }
+ 
+       /* Fill in the entry in the global offset table.  */
+       bfd_put_32 (output_bfd,

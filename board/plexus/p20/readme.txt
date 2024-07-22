@@ -15,7 +15,7 @@ couldn't make it fit. Support a max of 4MB of DRAM - more requires
 kernel HIGHMEM support, which isn't implemented yet
 
 Not binary-compatible with other m68k-linux systems (these requires a 68020 +
-FPU).  Shared libaries and PIC code not currently suported.
+FPU).
 
 How to build it
 ===============
@@ -48,6 +48,6 @@ Standalone binaries or alternate kernel images can be loaded via the tape drive
 by adding the following commandline options:
 
     -device scsi-tape,scsi-id=7,drive=p20tape \
-    -blockdev file,node-name=p20tape,filename=outpus/images/vmlinux.coff
+    -blockdev file,node-name=p20tape,filename=output/images/vmlinux.coff
 
 Then run `mt(,)` from the boot prompt

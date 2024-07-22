@@ -146,6 +146,21 @@ index 9bb888ab5009..aa13299bb725 100644
 +extern void config_plexus(void);
  
  #endif /* _M68K_CONFIG_H */
+diff --git a/arch/m68k/include/asm/elf.h b/arch/m68k/include/asm/elf.h
+index 2def06a99b08..3cde424cde48 100644
+--- a/arch/m68k/include/asm/elf.h
++++ b/arch/m68k/include/asm/elf.h
+@@ -78,7 +78,9 @@ typedef struct user_m68kfp_struct elf_fpregset_t;
+    the loader.  We need to make sure that it is out of the way of the program
+    that it will "exec", and that there is sufficient room for the brk.  */
+ 
+-#ifndef CONFIG_SUN3
++#if defined(CONFIG_PLEXUS)
++#define ELF_ET_DYN_BASE         0x00200000UL
++#elif !defined(CONFIG_SUN3)
+ #define ELF_ET_DYN_BASE         0xD0000000UL
+ #else
+ #define ELF_ET_DYN_BASE         0x0D800000UL
 diff --git a/arch/m68k/include/asm/irq.h b/arch/m68k/include/asm/irq.h
 index 7829e955ca04..494d50469762 100644
 --- a/arch/m68k/include/asm/irq.h
@@ -759,10 +774,10 @@ index 000000000000..8077bc48de19
 +#endif /* PLEXUS_PGALLOC_H */
 diff --git a/arch/m68k/include/asm/plexus_pgtable.h b/arch/m68k/include/asm/plexus_pgtable.h
 new file mode 100644
-index 000000000000..0366c795306a
+index 000000000000..7977dbf71c6b
 --- /dev/null
 +++ b/arch/m68k/include/asm/plexus_pgtable.h
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,151 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +#ifndef _PLEXUS_PGTABLE_H
 +#define _PLEXUS_PGTABLE_H
@@ -796,6 +811,11 @@ index 000000000000..0366c795306a
 +#ifndef __ASSEMBLY__
 +
 +#define PAGE_KERNEL __pgprot(0)
++
++#define PAGE_NONE       __pgprot(PLEXUS_PAGE_NORD | PLEXUS_PAGE_NOWR | PLEXUS_PAGE_NOEX)
++#define PAGE_READONLY   __pgprot(PLEXUS_PAGE_NOWR)
++#define PAGE_COPY       __pgprot(PLEXUS_PAGE_NOWR)
++#define PAGE_SHARED     __pgprot(0)
 +
 +#define PLEXUS_PAGE_CHG_MASK (PLEXUS_PAGE_PFNUM | PLEXUS_PAGE_REF | PLEXUS_PAGE_MOD)
 +
@@ -1400,9 +1420,18 @@ index 6f1ae01f322c..1c93a77e436a 100644
  		mmu = "unknown";
  
 diff --git a/arch/m68k/kernel/signal.c b/arch/m68k/kernel/signal.c
-index ba468b5f3f0b..6665f26c1e19 100644
+index ba468b5f3f0b..88f412bbc782 100644
 --- a/arch/m68k/kernel/signal.c
 +++ b/arch/m68k/kernel/signal.c
+@@ -72,7 +72,7 @@ static const int frame_size_change[16] = {
+   [5]	= -1, /* sizeof_field(struct frame, un.fmt5), */
+   [6]	= -1, /* sizeof_field(struct frame, un.fmt6), */
+   [7]	= sizeof_field(struct frame, un.fmt7),
+-  [8]	= -1, /* sizeof_field(struct frame, un.fmt8), */
++  [8]	= sizeof_field(struct frame, un.fmt8),
+   [9]	= sizeof_field(struct frame, un.fmt9),
+   [10]	= sizeof_field(struct frame, un.fmta),
+   [11]	= sizeof_field(struct frame, un.fmtb),
 @@ -84,7 +84,12 @@ static const int frame_size_change[16] = {
  
  static inline int frame_extra_sizes(int f)
@@ -1926,10 +1955,10 @@ index 000000000000..fe6dd94875c7
 +}
 diff --git a/arch/m68k/plexus/plexusmmu.c b/arch/m68k/plexus/plexusmmu.c
 new file mode 100644
-index 000000000000..22ee045a7671
+index 000000000000..e6aed82ccdcf
 --- /dev/null
 +++ b/arch/m68k/plexus/plexusmmu.c
-@@ -0,0 +1,240 @@
+@@ -0,0 +1,258 @@
 +/*
 + * linux/arch/m68k/plexus/plexusmmu.c -- Plexus Linux MMU (mapper) handling
 + *
@@ -2152,6 +2181,23 @@ index 000000000000..22ee045a7671
 +}
 +
 +static const pgprot_t protection_map[16] = {
++	[VM_NONE]					= PAGE_NONE,
++	[VM_READ]					= PAGE_READONLY,
++	[VM_WRITE]					= PAGE_COPY,
++	[VM_WRITE | VM_READ]				= PAGE_COPY,
++	[VM_EXEC]					= PAGE_READONLY,
++	[VM_EXEC | VM_READ]				= PAGE_READONLY,
++	[VM_EXEC | VM_WRITE]				= PAGE_COPY,
++	[VM_EXEC | VM_WRITE | VM_READ]			= PAGE_COPY,
++	[VM_SHARED]					= PAGE_NONE,
++	[VM_SHARED | VM_READ]				= PAGE_READONLY,
++	[VM_SHARED | VM_WRITE]				= PAGE_SHARED,
++	[VM_SHARED | VM_WRITE | VM_READ]		= PAGE_SHARED,
++	[VM_SHARED | VM_EXEC]				= PAGE_READONLY,
++	[VM_SHARED | VM_EXEC | VM_READ]			= PAGE_READONLY,
++	[VM_SHARED | VM_EXEC | VM_WRITE]		= PAGE_SHARED,
++	[VM_SHARED | VM_EXEC | VM_WRITE | VM_READ]	= PAGE_SHARED
++#if 0
 +	[VM_NONE]					= __pgprot(PLEXUS_PAGE_NONE),
 +	[VM_READ]					= __pgprot(PLEXUS_PAGE_NOWR | PLEXUS_PAGE_NOEX),
 +	[VM_WRITE]					= __pgprot(PLEXUS_PAGE_NORD | PLEXUS_PAGE_NOEX),
@@ -2168,6 +2214,7 @@ index 000000000000..22ee045a7671
 +	[VM_SHARED | VM_EXEC | VM_READ]			= __pgprot(PLEXUS_PAGE_NOWR),
 +	[VM_SHARED | VM_EXEC | VM_WRITE]		= __pgprot(PLEXUS_PAGE_NORD),
 +	[VM_SHARED | VM_EXEC | VM_WRITE | VM_READ]	= __pgprot(0),
++#endif
 +};
 +DECLARE_VM_GET_PAGE_PROT
 diff --git a/drivers/block/Kconfig b/drivers/block/Kconfig
